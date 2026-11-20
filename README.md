@@ -85,7 +85,10 @@ FastGithubPy/
 
 仓库已配置 GitHub Actions（`.github/workflows/build.yml`），**每次 push 代码都会自动打包 Windows exe**：
 
-- **普通 push**：打包后自动发布/更新 **Releases** 页的「最新构建（自动更新）」Release，附带 `FastGithubPy-windows.zip`，随时可下载最新版；同时也在 Actions 运行页的 **Artifacts** 中保留一份（90 天）。
+- **普通 push**：打包后自动发布/更新 **Releases** 页的「最新构建（自动更新）」Release，同时提供两个版本，随时可下载最新版：
+  - `FastGithubPy.exe` —— **单文件版**，双击即用，启动约慢几秒（每次解压到临时目录）。
+  - `FastGithubPy-windows.zip` —— **文件夹版**，解压后运行，启动更快。
+  - 两份产物也会在 Actions 运行页的 **Artifacts** 中保留（90 天）。
 - **推送 `v*` 标签**（如 `v1.0`）：在「最新构建」之外，再单独创建一个对应版本号的正式 Release。
 - 也可在 Actions 页面手动点 **Run workflow** 触发。
 
@@ -93,8 +96,8 @@ FastGithubPy/
 
 ```bash
 pip install pyinstaller
-pyinstaller FastGithubPy.spec --noconfirm
-# 产物在 dist/FastGithubPy/ 目录
+pyinstaller FastGithubPy.spec --noconfirm           # 文件夹版 → dist/FastGithubPy/
+pyinstaller FastGithubPy-onefile.spec --noconfirm   # 单文件版 → dist/FastGithubPy.exe
 ```
 
 ## 说明

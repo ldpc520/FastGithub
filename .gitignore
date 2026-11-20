@@ -7,10 +7,12 @@ venv/
 env/
 
 # PyInstaller 构建产物
-build/
-dist/
-dist_*/
-*.spec.bak
+build*/
+dist*/
+
+# 打包临时产物
+*.zip
+FastGithubPy.exe
 
 # 运行时生成的数据（配置/PAC/日志/IP 缓存）
 config/
