@@ -85,8 +85,8 @@ FastGithubPy/
 
 仓库已配置 GitHub Actions（`.github/workflows/build.yml`），**每次 push 代码都会自动打包 Windows exe**：
 
-- 普通 push：打包后生成构建产物 `FastGithubPy-windows.zip`，在 Actions 运行页面的 **Artifacts** 中下载（保留 90 天）。
-- 推送 `v*` 标签（如 `v1.0`）：除构建产物外，还会自动创建 **Release** 并附带 zip，可直接下载。
+- **普通 push**：打包后自动发布/更新 **Releases** 页的「最新构建（自动更新）」Release，附带 `FastGithubPy-windows.zip`，随时可下载最新版；同时也在 Actions 运行页的 **Artifacts** 中保留一份（90 天）。
+- **推送 `v*` 标签**（如 `v1.0`）：在「最新构建」之外，再单独创建一个对应版本号的正式 Release。
 - 也可在 Actions 页面手动点 **Run workflow** 触发。
 
 本地如需手动打包：
