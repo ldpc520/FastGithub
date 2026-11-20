@@ -1,0 +1,54 @@
+name: 自动打包 Windows exe
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: PyInstaller 打包
+        run: pyinstaller FastGithubPy.spec --noconfirm
+
+      - name: 压缩为 zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/FastGithubPy/*" -DestinationPath "FastGithubPy-windows.zip" -Force
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: FastGithubPy-windows
+          path: FastGithubPy-windows.zip
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: 发布 Release（推送 v* 标签时）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: FastGithubPy-windows.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
