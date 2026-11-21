@@ -1,8 +1,8 @@
 """Releases 页：查询仓库发布列表，一键生成各节点的加速下载链接。"""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtCore import Qt, QSize, QUrl
+from PyQt6.QtGui import QColor, QFont, QDesktopServices
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -61,7 +61,7 @@ class ReleasesPage(QWidget):
         search_layout.addLayout(row)
         root.addWidget(search_card)
 
-        tree_card, tree_layout = card("发布列表（右键资源生成加速链接）")
+        tree_card, tree_layout = card("发布列表（右键资源直接用浏览器下载）")
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["版本 / 资源", "大小", "下载次数"])
         self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -145,11 +145,26 @@ class ReleasesPage(QWidget):
         nodes = [n for n in self.service.nodemgr.results if n.ok][:8]
         if not nodes:
             nodes = self.service.nodemgr.results[:8]
+        # 首选：直接用默认浏览器打开下载
         for node in nodes:
-            menu.addAction(f"用 {node.name} 加速下载", lambda n=node: self._copy_link(n, asset))
+            menu.addAction(f"用 {node.name} 下载（浏览器）", lambda n=node: self._open_download(n, asset))
+        # 备选：复制链接
+        copy_menu = menu.addMenu("复制加速链接…")
+        for node in nodes:
+            copy_menu.addAction(node.name, lambda n=node: self._copy_link(n, asset))
+        menu.addAction("复制原始 GitHub 直链", lambda: self._copy_raw(asset))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _open_download(self, node, asset):
+        """用系统默认浏览器打开加速下载链接，直接触发浏览器下载。"""
+        url = NodeManager.build_url(node.url, asset.browser_download_url)
+        QDesktopServices.openUrl(QUrl(url))
 
     def _copy_link(self, node, asset):
         url = NodeManager.build_url(node.url, asset.browser_download_url)
         QApplication.clipboard().setText(url)
         QMessageBox.information(self, "已复制", f"加速链接已复制：\n{url}")
+
+    def _copy_raw(self, asset):
+        QApplication.clipboard().setText(asset.browser_download_url)
+        QMessageBox.information(self, "已复制", f"原始直链已复制：\n{asset.browser_download_url}")
