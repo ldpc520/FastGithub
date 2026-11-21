@@ -228,16 +228,17 @@ class IpManager:
         start = time.perf_counter()
         writer = None
         try:
-            conn = asyncio.open_connection(ip, port)
-            reader, writer = await asyncio.wait_for(conn, timeout=timeout)
-            # TLS 握手：用域名做 SNI，不校验证书名（中间路径可能改写）
+            # TLS 握手：用域名做 SNI，不校验证书（中间路径可能改写）。
+            # 必须把 ssl 上下文直接传给 open_connection——新版 Python（3.14+）
+            # 下对 StreamReader 单独调用 ctx.wrap_socket() 会抛 AttributeError，
+            # 导致所有探测被误判为失败。
             import ssl
 
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-            tls = asyncio.wait_for(ctx.wrap_socket(reader, server_hostname=domain), timeout=timeout)
-            await tls
+            conn = asyncio.open_connection(ip, port, ssl=ctx, server_hostname=domain)
+            reader, writer = await asyncio.wait_for(conn, timeout=timeout)
             ep.latency_ms = round((time.perf_counter() - start) * 1000, 1)
             ep.ok = True
         except Exception:
