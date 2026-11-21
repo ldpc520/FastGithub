@@ -143,6 +143,18 @@ class SettingsPage(QWidget):
     def _connect(self):
         self.save_btn.clicked.connect(self._save)
         self.autostart.check.stateChanged.connect(self._on_autostart)
+        # 加速启停后系统代理状态会变，收到信号立即刷新显示
+        self.service.proxy_state_signal.connect(self._on_proxy_state)
+
+    def showEvent(self, event):
+        # 每次切到设置页都重新读取注册表，避免显示过期状态
+        super().showEvent(event)
+        self._refresh_sysproxy_status()
+
+    def _on_proxy_state(self, running, port):
+        # 用 QTimer 延后一帧，等 service 写完注册表再读
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(200, self._refresh_sysproxy_status)
 
     def _load(self):
         self.autostart.setChecked(bool(self.cfg.get("auto_start", False)))
