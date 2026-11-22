@@ -162,10 +162,10 @@ class AppService(SignalBus):
 
     def start_auto_timer(self, root):
         """按 auto_update_hours 设置定时检查缓存新鲜度，0 表示不自动检查。"""
-        hours = int(self.cfg.get("auto_update_hours", 0) or 0)
+        hours = float(self.cfg.get("auto_update_hours", 0) or 0)
         if hours <= 0:
             return
-        interval_ms = hours * 3600 * 1000
+        interval_ms = int(hours * 3600 * 1000)
         root.after(interval_ms, self._auto_tick(root, interval_ms))
 
     def _auto_tick(self, root, interval_ms):
