@@ -30,7 +30,7 @@ class MainWindow:
     # (key, 显示名, tkwebui 内置图标名, 页面类, 标题, 副标题)
     PAGES = [
         ("dashboard", "总览", "speed", DashboardPage,
-         "加速总览", "一键启停本地代理，查看实时流量与域名 IP 优选结果"),
+         "加速总览", "一键启停本地代理，查看流量统计与域名 IP 优选结果"),
         ("nodes", "加速节点", "sources", NodesPage,
          "GitHub 加速节点", "github.akams.cn 公开节点测速，一键生成加速下载链接"),
         ("releases", "Releases", "download", ReleasesPage,
@@ -102,7 +102,7 @@ class MainWindow:
         self.header_title = ttk.Label(header, text="加速总览", style="Strong.TLabel",
                                       font=("Microsoft YaHei UI", 17, "bold"))
         self.header_title.pack(anchor="w")
-        self.header_sub = ttk.Label(header, text="一键启停本地代理，查看实时流量与域名 IP 优选结果",
+        self.header_sub = ttk.Label(header, text="一键启停本地代理，查看流量统计与域名 IP 优选结果",
                                     style="Muted.TLabel")
         self.header_sub.pack(anchor="w", pady=(3, 0))
 

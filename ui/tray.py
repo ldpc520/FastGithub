@@ -2,6 +2,12 @@
 
 pystray 的 run() 会阻塞，因此放在独立守护线程；所有对 tkinter 主线程的
 操作都通过 window.root.after(...) 派发，避免跨线程操作控件。
+
+注意（Windows/pystray 踩坑）：
+1. 菜单里只能有一个 default=True 项，多了会在 _create_menu 时抛 WinError 87，
+   导致托盘线程直接崩溃、右键无反应。
+2. MenuItem.text 是只读属性，不能赋值；需要动态文字时用 lambda 作为 text，
+   再调用 icon.update_menu() 刷新。
 """
 from __future__ import annotations
 
@@ -40,14 +46,14 @@ class TrayController:
         self.root = window.root
         self.icon = None
         self._thread = None
-        self._running = False
-        self._toggle_item = None
+        self._running = False  # 代理是否运行中（供菜单动态文字读取）
+        self._port = None
 
     def start(self):
-        self._toggle_item = MenuItem("启动加速", self._on_toggle, default=True)
+        # 只有一个 default 项：双击托盘 = 显示主界面
         menu = Menu(
             MenuItem("显示主界面", self._on_show, default=True),
-            self._toggle_item,
+            MenuItem(lambda item: "停止加速" if self._running else "启动加速", self._on_toggle),
             MenuItem("更新 IP", self._on_refresh),
             Menu.SEPARATOR,
             MenuItem("退出", self._on_quit),
@@ -63,11 +69,14 @@ class TrayController:
             log.warn(f"托盘线程退出：{exc}")
 
     def update_state(self, running, port):
+        """代理状态变化时：更新状态变量并刷新菜单文字/提示。"""
+        self._running = bool(running)
+        self._port = port
         try:
-            self._toggle_item.text = "停止加速" if running else "启动加速"
             self.icon.title = f"FastGithubPy - {'运行中' if running else '已停止'}"
-        except Exception:
-            pass
+            self.icon.update_menu()
+        except Exception as exc:
+            log.debug(f"托盘状态刷新失败：{exc}")
 
     def notify(self, title, message):
         try:

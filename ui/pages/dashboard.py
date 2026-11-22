@@ -1,20 +1,17 @@
-"""仪表盘页：加速开关、实时指标、流量图、IP 候选列表。"""
+"""仪表盘页：加速开关、实时指标、IP 候选列表。"""
 from __future__ import annotations
 
-import tkinter as tk
 from tkinter import ttk
 
 from core.loghub import log
 from ui.widgets import card, make_table, metric_card
-from ui.theme import COLORS, CHART_BG, GRID
+from ui.theme import COLORS
 
 
 class DashboardPage(ttk.Frame):
     def __init__(self, service, master=None):
         super().__init__(master)
         self.service = service
-        self._up_history: list[float] = []
-        self._down_history: list[float] = []
         self._build_ui()
         self.service.proxy_state_signal.connect(self.on_proxy_state)
         self.service.stats_signal.connect(self.on_stats)
@@ -44,13 +41,6 @@ class DashboardPage(ttk.Frame):
         self.card_down, self.v_down = metric_card(metrics, "下载流量", "0 B", COLORS["green"])
         for i, c in enumerate((self.card_status, self.card_port, self.card_up, self.card_down)):
             c.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 8, 0))
-
-        # 流量图
-        chart_wrap, chart_body = card(self, "实时流量（每秒采样 · KB/s）")
-        chart_wrap.pack(fill="x", pady=(0, 14))
-        self.canvas = tk.Canvas(chart_body, height=150, bg=CHART_BG, highlightthickness=0)
-        self.canvas.pack(fill="both", expand=True)
-        self.canvas.bind("<Configure>", lambda e: self._draw_chart())
 
         # IP 表
         ip_wrap, ip_body = card(self, "域名 IP 候选（按延迟排序）")
@@ -93,16 +83,6 @@ class DashboardPage(ttk.Frame):
     def on_stats(self, stats):
         self.v_up.configure(text=self._fmt(stats.upload))
         self.v_down.configure(text=self._fmt(stats.download))
-        history = stats.history
-        ups, downs = [], []
-        for i, (u, d) in enumerate(history):
-            pu = history[i - 1][0] if i > 0 else 0
-            pd = history[i - 1][1] if i > 0 else 0
-            ups.append(max(0, u - pu) / 1024)
-            downs.append(max(0, d - pd) / 1024)
-        self._up_history = ups[-60:]
-        self._down_history = downs[-60:]
-        self._draw_chart()
 
     def on_refresh_done(self, result):
         self.refresh_btn.configure(text="⟳ 更新 IP", state="normal")
@@ -116,47 +96,6 @@ class DashboardPage(ttk.Frame):
             self.ip_table.insert("", "end", values=(
                 data["domain"], data["best"], str(data["count"]), str(data["latency"])
             ), tags=tag)
-
-    # ---------- 流量图绘制 ----------
-    def _draw_chart(self):
-        c = self.canvas
-        c.delete("all")
-        w, h = c.winfo_width(), c.winfo_height()
-        if w < 20 or h < 20:
-            return
-        pad_l, pad_r, pad_t, pad_b = 40, 12, 10, 22
-        plot_w = w - pad_l - pad_r
-        plot_h = h - pad_t - pad_b
-        # 网格 + Y 轴刻度
-        vals = self._up_history + self._down_history
-        vmax = max(vals) if vals else 1
-        vmax = max(vmax, 1)
-        for i in range(4):
-            y = pad_t + plot_h * i / 3
-            c.create_line(pad_l, y, w - pad_r, y, fill=GRID)
-            c.create_text(pad_l - 6, y, text=f"{vmax * (3 - i) / 3:.0f}",
-                          anchor="e", fill="#616161", font=("Microsoft YaHei UI", 8))
-        # 图例
-        c.create_line(w - 150, 12, w - 130, 12, fill=COLORS["blue"], width=2)
-        c.create_text(w - 124, 12, text="上传", anchor="w", fill="#1B1B1B",
-                      font=("Microsoft YaHei UI", 9))
-        c.create_line(w - 80, 12, w - 60, 12, fill=COLORS["green"], width=2)
-        c.create_text(w - 54, 12, text="下载", anchor="w", fill="#1B1B1B",
-                      font=("Microsoft YaHei UI", 9))
-        # 曲线
-        self._plot_line(self._up_history, pad_l, pad_t, plot_w, plot_h, vmax, COLORS["blue"])
-        self._plot_line(self._down_history, pad_l, pad_t, plot_w, plot_h, vmax, COLORS["green"])
-
-    def _plot_line(self, data, x0, y0, pw, ph, vmax, color):
-        if len(data) < 2:
-            return
-        step = pw / max(1, len(data) - 1)
-        pts = []
-        for i, v in enumerate(data):
-            x = x0 + i * step
-            y = y0 + ph - (v / vmax) * ph
-            pts.extend((x, y))
-        self.canvas.create_line(*pts, fill=color, width=2, smooth=True)
 
     @staticmethod
     def _fmt(n: int) -> str:
