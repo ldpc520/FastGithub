@@ -45,6 +45,10 @@ def main():
     service = AppService()
     window = MainWindow(root, service)
 
+    # --minimized：开机自启/后台启动时直接收进托盘（托盘不可用则保持窗口可见）
+    if "--minimized" in sys.argv:
+        window.hide_to_tray()
+
     # 启动后约 15 秒自动刷新 IP
     if service.cfg.get("auto_start_refresh", True):
         root.after(15000, service.refresh_ips)

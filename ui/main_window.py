@@ -50,6 +50,8 @@ class MainWindow:
         self._quitting = False
         self._build_ui()
         self._build_tray()
+        # 点标题栏最小化按钮时也收进托盘（与关闭按钮行为一致）
+        root.bind("<Unmap>", self._on_unmap)
         # 定时把 core 线程的信号派发到 UI 主线程
         self._pump()
 
@@ -176,7 +178,45 @@ class MainWindow:
             )
 
     def show_window(self):
-        self.root.after(0, self.root.deiconify)
+        """从托盘恢复窗口：显示、置顶并抢回焦点。"""
+        def _restore():
+            if self._quitting:
+                return
+            try:
+                self.root.deiconify()
+                self.root.lift()
+                self.root.focus_force()
+            except Exception:
+                pass
+        self.root.after(0, _restore)
+
+    def hide_to_tray(self):
+        """把窗口收进托盘，服务继续后台运行。托盘不可用时拒绝隐藏，避免找不到窗口。"""
+        if self._quitting or not self._tray:
+            return False
+        try:
+            self.root.withdraw()
+            return True
+        except Exception:
+            return False
+
+    def _on_unmap(self, event=None):
+        """点标题栏最小化按钮时收进托盘；主动 withdraw 不是 iconic，不会被误判。"""
+        if self._quitting or not self._tray:
+            return
+        if not self.service.cfg.get("minimize_to_tray", True):
+            return
+        # 推迟到空闲时判断窗口状态，避开窗口管理器的状态切换时序
+        self.root.after_idle(self._maybe_hide_on_minimize)
+
+    def _maybe_hide_on_minimize(self):
+        if self._quitting or not self._tray:
+            return
+        try:
+            if self.root.state() == "iconic":
+                self.hide_to_tray()
+        except Exception:
+            pass
 
     def quit_app(self):
         """真正退出程序：移除托盘图标 → 关闭服务 → 销毁窗口。"""
@@ -198,7 +238,9 @@ class MainWindow:
             pass
 
     def _on_close(self):
-        # 关闭窗口 = 直接退出（避免"点了关闭却退不出"的困惑）
+        # 点窗口关闭按钮：按设置决定"收进托盘"还是"直接退出"
+        if self.service.cfg.get("minimize_to_tray", True) and self.hide_to_tray():
+            return
         self.quit_app()
 
     # ---------- 信号泵 ----------
