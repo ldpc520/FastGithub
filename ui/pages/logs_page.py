@@ -6,6 +6,7 @@ from tkinter import ttk, messagebox
 
 from core.loghub import log
 from ui.widgets import card
+from ui.theme import FIELD_BG, FIELD_FG
 
 
 class LogsPage(ttk.Frame):
@@ -28,17 +29,17 @@ class LogsPage(ttk.Frame):
 
         wrap, body = card(self)
         wrap.pack(fill="both", expand=True)
-        self.text = tk.Text(body, wrap="none", height=20, bg="#151822", fg="#d5d3e8",
-                            insertbackground="#d5d3e8", relief="flat", font=("Consolas", 10))
+        self.text = tk.Text(body, wrap="none", height=20, bg=FIELD_BG, fg=FIELD_FG,
+                            insertbackground=FIELD_FG, relief="flat", font=("Consolas", 10))
         vsb = ttk.Scrollbar(body, orient="vertical", command=self.text.yview)
         self.text.configure(yscrollcommand=vsb.set)
         self.text.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
         # 日志级别着色
-        self.text.tag_configure("INFO", foreground="#9aa2b7")
-        self.text.tag_configure("DEBUG", foreground="#6f7690")
-        self.text.tag_configure("WARN", foreground="#e8c05a")
-        self.text.tag_configure("ERROR", foreground="#e06c75")
+        self.text.tag_configure("INFO", foreground="#4a4a4a")
+        self.text.tag_configure("DEBUG", foreground="#9a9a9a")
+        self.text.tag_configure("WARN", foreground="#8A6100")
+        self.text.tag_configure("ERROR", foreground="#C42B1C")
 
     def on_log(self, level, line):
         self._append(line, level)

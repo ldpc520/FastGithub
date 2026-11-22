@@ -1,8 +1,9 @@
-"""暗色主题：把 tkwebui 的浅色调色板覆盖为深紫黑风格。
+"""Win11 浅色主题：覆盖 tkwebui 调色板为 Fluent 风格浅色。
 
 在 root = tk.Tk() 之后、创建任何控件之前调用 apply_dark_theme(root)。
-tkwebui 的 apply_theme 会读取模块级 PALETTE 字典，因此覆盖它即可
-让 Card / Sidebar / 表格 / 按钮 / 输入框等全部组件换成暗色。
+（函数名保留历史命名以兼容入口，实际套用的是 Win11 浅色风格。）
+tkwebui 的 apply_theme 会读取模块级 PALETTE 字典，覆盖它即可
+让 Card / Sidebar / 表格 / 按钮 / 输入框等全部组件换成浅色。
 """
 from __future__ import annotations
 
@@ -11,50 +12,62 @@ from tkinter import ttk
 
 from tkwebui import PALETTE, apply_theme as _tkwebui_apply
 
-# 深紫黑风格（沿用原 PyQt6 版本配色，用户已确认喜欢）
-DARK = {
-    "bg": "#1e1b2e",          # 主背景
-    "sidebar": "#211e33",     # 侧栏背景
-    "fg": "#d5d3e8",          # 主文字
-    "muted": "#8b86a8",       # 次要文字
-    "border": "#322d4a",      # 边框
-    "hover": "#292541",       # 悬停
-    "active": "#3a3358",      # 选中/激活
-    "accent": "#7c5cff",      # 强调色（紫）
-    "accent_hover": "#6a4ce0",
-    "blue": "#8b7bff",
-    "selected": "#332c55",    # 选中行/卡片
-    "disabled": "#5a5670",
+# Win11 Fluent 浅色风格
+LIGHT = {
+    "bg": "#FFFFFF",          # 主背景
+    "sidebar": "#F3F3F3",     # 侧栏背景
+    "fg": "#1B1B1B",          # 主文字
+    "muted": "#616161",       # 次要文字
+    "border": "#E5E5E5",      # 边框
+    "hover": "#EEEEEE",       # 悬停
+    "active": "#E0E0E0",      # 选中/激活
+    "accent": "#0067C0",      # 强调色（Win11 蓝）
+    "accent_hover": "#005A9E",
+    "blue": "#0067C0",
+    "selected": "#E8F0FE",    # 选中行/卡片
+    "disabled": "#9A9A9A",
 }
 
-# 附加语义色（图表曲线、状态）
+# 兼容旧导入名（main_window.py 仍 from ui.theme import DARK）
+DARK = LIGHT
+
+# 语义色（浅底上加深以保证对比度）
 COLORS = {
-    "green": "#4ec9a0",
-    "red": "#e06c75",
-    "blue": "#7f9dff",
-    "purple": "#a792ff",
-    "yellow": "#e8c05a",
+    "green": "#107C10",      # Win11 绿
+    "red": "#C42B1C",        # Win11 红
+    "blue": "#0067C0",       # Win11 蓝
+    "purple": "#6B46C1",     # 深紫（浅底可读）
+    "yellow": "#8A6100",     # 深黄（浅底文字可读）
 }
+
+# 提示条 / 文本框背景
+NOTICE_BG = "#FFF4CE"        # Win11 浅黄提示底
+FIELD_BG = "#FFFFFF"         # 输入框底
+FIELD_FG = "#1B1B1B"         # 输入框文字
+PLACEHOLDER_FG = "#9A9A9A"   # 占位符
+CHART_BG = "#FAFAFA"         # 流量图背景
+GRID = "#E5E5E5"             # 图表网格
+ALT_ROW = "#F5F5F7"          # 表格交替行
 
 
 def apply_dark_theme(root: tk.Tk) -> dict:
     """覆盖调色板并应用 tkwebui 主题，返回调色板副本。"""
-    PALETTE.update(DARK)
+    PALETTE.update(LIGHT)
     palette = _tkwebui_apply(
         root,
         font_family="Microsoft YaHei UI",
         font_size=10,
-        accent=DARK["accent"],
-        accent_hover=DARK["accent_hover"],
+        accent=LIGHT["accent"],
+        accent_hover=LIGHT["accent_hover"],
     )
     # 补充自定义样式：状态标签、提示条等
     style = ttk.Style(root)
-    style.configure("Success.TLabel", foreground=COLORS["green"], background=DARK["bg"])
-    style.configure("Danger.TLabel", foreground=COLORS["red"], background=DARK["bg"])
-    style.configure("StatusOn.TLabel", foreground=COLORS["green"], background=DARK["bg"])
-    style.configure("StatusOff.TLabel", foreground=COLORS["red"], background=DARK["bg"])
-    style.configure("Warn.TLabel", foreground=COLORS["yellow"], background=DARK["bg"])
-    style.configure("Link.TLabel", foreground=COLORS["blue"], background=DARK["bg"])
-    # 提示条：浅黄底深黄字，用 Quiet 框架背景近似
-    style.configure("Notice.TFrame", background="#3a3320")
+    style.configure("Success.TLabel", foreground=COLORS["green"], background=LIGHT["bg"])
+    style.configure("Danger.TLabel", foreground=COLORS["red"], background=LIGHT["bg"])
+    style.configure("StatusOn.TLabel", foreground=COLORS["green"], background=LIGHT["bg"])
+    style.configure("StatusOff.TLabel", foreground=COLORS["red"], background=LIGHT["bg"])
+    style.configure("Warn.TLabel", foreground=COLORS["yellow"], background=NOTICE_BG)
+    style.configure("Link.TLabel", foreground=COLORS["blue"], background=LIGHT["bg"])
+    # 提示条：浅黄底深黄字（Win11 通知风格）
+    style.configure("Notice.TFrame", background=NOTICE_BG)
     return palette

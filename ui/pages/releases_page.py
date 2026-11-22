@@ -50,7 +50,7 @@ class ReleasesPage(ttk.Frame):
         self.tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
         self.tree.tag_configure("release", foreground=COLORS["purple"], font=("Microsoft YaHei UI", 10, "bold"))
-        self.tree.tag_configure("asset", foreground="#c9c6de")
+        self.tree.tag_configure("asset", foreground="#1B1B1B")
         # 右键菜单
         self.menu = tk.Menu(self, tearoff=0)
         self.tree.bind("<Button-3>", self._on_right_click)

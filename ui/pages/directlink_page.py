@@ -6,6 +6,7 @@ from tkinter import ttk
 
 from core.directlink import convert_batch
 from ui.widgets import card
+from ui.theme import COLORS, FIELD_BG, FIELD_FG, PLACEHOLDER_FG
 
 
 class DirectLinkPage(ttk.Frame):
@@ -19,8 +20,8 @@ class DirectLinkPage(ttk.Frame):
         # 输入区
         in_wrap, in_body = card(self, "粘贴 GitHub 链接（支持多行批量，每行一个）")
         in_wrap.pack(fill="both", expand=True, pady=(0, 14))
-        self.input = tk.Text(in_body, height=6, wrap="none", bg="#151822", fg="#d5d3e8",
-                             insertbackground="#d5d3e8", relief="flat", font=("Microsoft YaHei UI", 10))
+        self.input = tk.Text(in_body, height=6, wrap="none", bg=FIELD_BG, fg=FIELD_FG,
+                             insertbackground=FIELD_FG, relief="flat", font=("Microsoft YaHei UI", 10))
         self.input.pack(fill="both", expand=True)
         self._set_placeholder()
         self.input.bind("<FocusIn>", self._on_focus_in)
@@ -44,8 +45,8 @@ class DirectLinkPage(ttk.Frame):
         out_wrap.pack(fill="both", expand=True)
         ttk.Label(out_body, text="blob/raw 文件页 → raw 直链；tree 目录页 → zip 打包下载；每行一个，实时转换。",
                   style="Muted.TLabel", wraplength=900).pack(anchor="w", pady=(0, 8))
-        self.output = tk.Text(out_body, height=8, wrap="none", bg="#151822", fg="#7f9dff",
-                              insertbackground="#d5d3e8", relief="flat", font=("Microsoft YaHei UI", 10))
+        self.output = tk.Text(out_body, height=8, wrap="none", bg=FIELD_BG, fg=COLORS["blue"],
+                              insertbackground=FIELD_FG, relief="flat", font=("Microsoft YaHei UI", 10))
         vsb = ttk.Scrollbar(out_body, orient="vertical", command=self.output.yview)
         self.output.configure(yscrollcommand=vsb.set)
         self.output.pack(side="left", fill="both", expand=True)
@@ -59,13 +60,13 @@ class DirectLinkPage(ttk.Frame):
         self.input.insert("1.0",
             "https://github.com/owner/repo/blob/main/path/to/file.txt\n"
             "https://github.com/owner/repo/tree/main/src")
-        self.input.configure(fg="#6f7690")
+        self.input.configure(fg=PLACEHOLDER_FG)
         self._placeholder = True
 
     def _on_focus_in(self, event):
         if getattr(self, "_placeholder", False):
             self.input.delete("1.0", "end")
-            self.input.configure(fg="#d5d3e8")
+            self.input.configure(fg=FIELD_FG)
             self._placeholder = False
 
     def _on_focus_out(self, event):

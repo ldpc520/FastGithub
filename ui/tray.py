@@ -76,11 +76,18 @@ class TrayController:
             pass
 
     def stop(self):
+        """停止托盘并等待线程退出，确保系统托盘图标被移除（避免残留）。"""
         try:
             if self.icon:
                 self.icon.stop()
         except Exception:
             pass
+        # 等待托盘线程从 run() 返回，让图标完成从系统托盘的注销
+        if self._thread and self._thread.is_alive():
+            try:
+                self._thread.join(timeout=2.0)
+            except Exception:
+                pass
 
     # ---- 菜单回调（托盘线程）→ 派发到 UI 主线程 ----
     def _on_show(self, icon=None, item=None):

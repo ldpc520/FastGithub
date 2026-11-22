@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from tkwebui import Card, PALETTE
-from .theme import COLORS
+from .theme import COLORS, ALT_ROW
 
 
 def card(master, title: str | None = None, **kwargs) -> tuple[Card, ttk.Frame]:
@@ -43,7 +43,7 @@ def make_table(master, columns: list[tuple[str, str, int]], height: int = 10):
         tree.heading(cid, text=heading, anchor="w")
         tree.column(cid, width=width, anchor="w", stretch=(cid == cols[-1]))
     # 交替行颜色
-    tree.tag_configure("oddrow", background="#242038")
+    tree.tag_configure("oddrow", background=ALT_ROW)
     return frame, tree
 
 

@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from core.loghub import log
-from ui.theme import DARK, COLORS
+from ui.theme import DARK, COLORS, NOTICE_BG
 from ui.pages.dashboard import DashboardPage
 from ui.pages.nodes_page import NodesPage
 from ui.pages.releases_page import ReleasesPage
@@ -47,6 +47,7 @@ class MainWindow:
         self.root = root
         self.service = service
         self._tray = None
+        self._quitting = False
         self._build_ui()
         self._build_tray()
         # 定时把 core 线程的信号派发到 UI 主线程
@@ -109,8 +110,8 @@ class MainWindow:
         notice = ttk.Frame(right, padding=(12, 8), style="Notice.TFrame")
         notice.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 12))
         ttk.Label(notice, text="⚠", foreground=COLORS["yellow"],
-                  background="#3a3320", font=("Microsoft YaHei UI", 14)).pack(side="left")
-        ttk.Label(notice, style="Warn.TLabel", background="#3a3320",
+                  background=NOTICE_BG, font=("Microsoft YaHei UI", 14)).pack(side="left")
+        ttk.Label(notice, style="Warn.TLabel", background=NOTICE_BG,
                   text="首次使用请点「更新 IP」测速，再点「启动加速」；程序会自动设置/还原系统代理。",
                   wraplength=780, justify="left").pack(side="left", padx=8)
 
@@ -178,25 +179,27 @@ class MainWindow:
         self.root.after(0, self.root.deiconify)
 
     def quit_app(self):
+        """真正退出程序：移除托盘图标 → 关闭服务 → 销毁窗口。"""
+        if self._quitting:
+            return
+        self._quitting = True
         try:
             if self._tray:
-                self._tray.stop()
+                self._tray.stop()  # 会等待托盘线程结束并注销图标
         except Exception:
             pass
         try:
             self.service.shutdown()
         except Exception:
             pass
-        self.root.after(0, self.root.destroy)
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
 
     def _on_close(self):
-        # 关闭窗口隐藏到托盘；托盘不可用时直接退出
-        if self._tray:
-            self.root.withdraw()
-            if self.service.cfg.get("tray_notify", True):
-                self._tray.notify("FastGithubPy", "已最小化到托盘")
-        else:
-            self.quit_app()
+        # 关闭窗口 = 直接退出（避免"点了关闭却退不出"的困惑）
+        self.quit_app()
 
     # ---------- 信号泵 ----------
     def _pump(self):

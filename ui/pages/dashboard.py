@@ -6,7 +6,7 @@ from tkinter import ttk
 
 from core.loghub import log
 from ui.widgets import card, make_table, metric_card
-from ui.theme import COLORS
+from ui.theme import COLORS, CHART_BG, GRID
 
 
 class DashboardPage(ttk.Frame):
@@ -48,7 +48,7 @@ class DashboardPage(ttk.Frame):
         # 流量图
         chart_wrap, chart_body = card(self, "实时流量（每秒采样 · KB/s）")
         chart_wrap.pack(fill="x", pady=(0, 14))
-        self.canvas = tk.Canvas(chart_body, height=150, bg=DARK_BG, highlightthickness=0)
+        self.canvas = tk.Canvas(chart_body, height=150, bg=CHART_BG, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda e: self._draw_chart())
 
@@ -133,15 +133,15 @@ class DashboardPage(ttk.Frame):
         vmax = max(vmax, 1)
         for i in range(4):
             y = pad_t + plot_h * i / 3
-            c.create_line(pad_l, y, w - pad_r, y, fill="#322d4a")
+            c.create_line(pad_l, y, w - pad_r, y, fill=GRID)
             c.create_text(pad_l - 6, y, text=f"{vmax * (3 - i) / 3:.0f}",
-                          anchor="e", fill="#8b86a8", font=("Microsoft YaHei UI", 8))
+                          anchor="e", fill="#616161", font=("Microsoft YaHei UI", 8))
         # 图例
         c.create_line(w - 150, 12, w - 130, 12, fill=COLORS["blue"], width=2)
-        c.create_text(w - 124, 12, text="上传", anchor="w", fill="#d5d3e8",
+        c.create_text(w - 124, 12, text="上传", anchor="w", fill="#1B1B1B",
                       font=("Microsoft YaHei UI", 9))
         c.create_line(w - 80, 12, w - 60, 12, fill=COLORS["green"], width=2)
-        c.create_text(w - 54, 12, text="下载", anchor="w", fill="#d5d3e8",
+        c.create_text(w - 54, 12, text="下载", anchor="w", fill="#1B1B1B",
                       font=("Microsoft YaHei UI", 9))
         # 曲线
         self._plot_line(self._up_history, pad_l, pad_t, plot_w, plot_h, vmax, COLORS["blue"])
@@ -165,6 +165,3 @@ class DashboardPage(ttk.Frame):
                 return f"{n:.1f} {unit}" if unit != "B" else f"{int(n)} B"
             n /= 1024
         return f"{n:.1f} TB"
-
-
-DARK_BG = "#151822"
