@@ -40,7 +40,7 @@ class SettingsPage(ttk.Frame):
         self.mintray_row.pack(fill="x")
         divider(run_body)
         self.autorefresh_row, self.autorefresh_var = toggle_row(
-            run_body, "启动后自动刷新 IP", "启动约 15 秒后自动测速一次")
+            run_body, "启动后检查 IP 缓存", "启动约 15 秒后检查缓存，有效则直接用，过期/缺失才测速")
         self.autorefresh_row.pack(fill="x")
 
         # 代理设置
@@ -85,6 +85,8 @@ class SettingsPage(ttk.Frame):
         self.interval_combo = ttk.Combobox(int_row, textvariable=self.interval_var, state="readonly", width=16)
         self.interval_combo["values"] = ["不自动更新", "6 小时", "12 小时", "24 小时", "3 天"]
         self.interval_combo.pack(side="left")
+        ttk.Label(int_row, text="（缓存过期后自动测速，修改后需重启生效）",
+                  style="Muted.TLabel").pack(side="left", padx=(8, 0))
         host_row = ttk.Frame(ip_body)
         host_row.pack(fill="x", pady=(10, 0))
         ttk.Label(host_row, text="hosts 源：").pack(side="left")

@@ -49,9 +49,11 @@ def main():
     if "--minimized" in sys.argv:
         window.hide_to_tray()
 
-    # 启动后约 15 秒自动刷新 IP
+    # 启动后约 15 秒检查 IP 缓存：有效则直接用，缺失/过期才测速
     if service.cfg.get("auto_start_refresh", True):
-        root.after(15000, service.refresh_ips)
+        root.after(15000, service.refresh_if_stale)
+    # 按设置里的"自动更新间隔"定时检查（0=不自动更新）
+    service.start_auto_timer(root)
 
     try:
         root.mainloop()
