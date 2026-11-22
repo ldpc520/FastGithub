@@ -128,10 +128,11 @@ class LocalProxy:
         except Exception as exc:
             self.stats.failures += 1
             self.ipmgr.report_failure(host, remote_host)
-            log.warn(f"CONNECT {target} 连接失败：{exc}")
+            log.log("ACCESS_FAIL", f"CONNECT {host}:{port} → {remote_host}:{port} 失败：{exc}")
             writer.write(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
             await writer.drain()
             return
+        log.log("ACCESS_OK", f"CONNECT {host}:{port} → {remote_host}:{port} 已连通")
         writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         await writer.drain()
         await self._pipe(reader, writer, remote_r, remote_w)
@@ -157,10 +158,11 @@ class LocalProxy:
             )
         except Exception as exc:
             self.stats.failures += 1
-            log.warn(f"{target} 连接失败：{exc}")
+            log.log("ACCESS_FAIL", f"{method} {target} → {remote_host}:{remote_port} 失败：{exc}")
             writer.write(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
             await writer.drain()
             return
+        log.log("ACCESS_OK", f"{method} {target} → {remote_host}:{remote_port} 已连通")
 
         path = parsed.path or "/"
         if parsed.query:

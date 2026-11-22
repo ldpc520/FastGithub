@@ -40,13 +40,21 @@ class LogsPage(ttk.Frame):
         self.text.tag_configure("DEBUG", foreground="#9a9a9a")
         self.text.tag_configure("WARN", foreground="#8A6100")
         self.text.tag_configure("ERROR", foreground="#C42B1C")
+        # 访问详情：连通绿色、失败红色
+        self.text.tag_configure("ACCESS_OK", foreground="#107C10")
+        self.text.tag_configure("ACCESS_FAIL", foreground="#C42B1C")
 
     def on_log(self, level, line):
         self._append(line, level)
 
     def _append(self, line, level=None):
         if level is None:
-            level = "WARN" if "[WARN]" in line else "ERROR" if "[ERROR]" in line else "DEBUG" if "[DEBUG]" in line else "INFO"
+            if "[ACCESS_FAIL]" in line:
+                level = "ACCESS_FAIL"
+            elif "[ACCESS_OK]" in line:
+                level = "ACCESS_OK"
+            else:
+                level = "WARN" if "[WARN]" in line else "ERROR" if "[ERROR]" in line else "DEBUG" if "[DEBUG]" in line else "INFO"
         self.text.insert("end", line + "\n", level)
         # 限制行数
         if int(self.text.index("end-1c").split(".")[0]) > self.MAX_LINES:
