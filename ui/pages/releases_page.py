@@ -1,88 +1,62 @@
-"""Releases 页：查询仓库发布列表，一键生成各节点的加速下载链接。"""
+"""Releases 页：查询仓库发布列表，右键资源直接用浏览器下载。"""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QSize, QUrl
-from PyQt6.QtGui import QColor, QFont, QDesktopServices
-from PyQt6.QtWidgets import (
-    QAbstractItemView,
-    QApplication,
-    QComboBox,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QLineEdit,
-    QMenu,
-    QMessageBox,
-    QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
-    QTreeWidget,
-    QTreeWidgetItem,
-    QVBoxLayout,
-    QWidget,
-)
+import tkinter as tk
+from tkinter import ttk, messagebox
+import webbrowser
 
-from core.githubapi import Release
 from core.nodes import NodeManager
 from ui.widgets import card
+from ui.theme import COLORS
 
 
-class ReleasesPage(QWidget):
-    def __init__(self, service, parent=None):
-        super().__init__(parent)
+class ReleasesPage(ttk.Frame):
+    def __init__(self, service, master=None):
+        super().__init__(master)
         self.service = service
-        self._releases: list[Release] = []
+        self._releases = []
+        self._tree_data = {}  # item id -> ReleaseAsset
         self._build_ui()
-        self._connect()
+        self.service.releases_done_signal.connect(self._on_releases)
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 18)
-        root.setSpacing(14)
-        head = QHBoxLayout()
-        title = QLabel("Releases 加速下载")
-        title.setObjectName("h1")
-        title.setVisible(False)  # 顶部标题栏已显示
-        head.addWidget(title)
-        head.addStretch(1)
-        root.addLayout(head)
+        # 查询区
+        search_wrap, search_body = card(self, "查询仓库")
+        search_wrap.pack(fill="x", pady=(0, 14))
+        row = ttk.Frame(search_body)
+        row.pack(fill="x")
+        ttk.Label(row, text="仓库：").pack(side="left")
+        self.repo_var = tk.StringVar()
+        self.repo_input = ttk.Entry(row, textvariable=self.repo_var, width=48)
+        self.repo_input.pack(side="left", padx=(0, 8))
+        self.repo_input.bind("<Return>", lambda e: self._search())
+        self.search_btn = ttk.Button(row, text="查询 Releases", style="Primary.TButton", command=self._search)
+        self.search_btn.pack(side="left")
+        ttk.Label(search_body, text="输入 owner/repo，如 tidain/YunX-Desktop",
+                  style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
 
-        search_card, search_layout = card("查询仓库")
-        row = QHBoxLayout()
-        self.repo_input = QLineEdit()
-        self.repo_input.setPlaceholderText("输入 owner/repo，如 tidain/YunX-Desktop")
-        self.repo_input.setMinimumWidth(320)
-        self.repo_input.returnPressed.connect(self._search)
-        self.search_btn = QPushButton("查询 Releases")
-        self.search_btn.setObjectName("primary")
-        row.addWidget(self.repo_input, 1)
-        row.addWidget(self.search_btn)
-        row.addStretch(1)
-        search_layout.addLayout(row)
-        root.addWidget(search_card)
-
-        tree_card, tree_layout = card("发布列表（右键资源直接用浏览器下载）")
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["版本 / 资源", "大小", "下载次数"])
-        self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.tree.setIndentation(20)  # 子节点缩进更明显
-        self.tree.setRootIsDecorated(True)
-        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        tree_layout.addWidget(self.tree)
-        root.addWidget(tree_card, 1)
-
-    def _connect(self):
-        self.search_btn.clicked.connect(self._search)
-        self.service.releases_done_signal.connect(self._on_releases)
-        self.tree.customContextMenuRequested.connect(self._context_menu)
+        # 发布列表（Treeview 层级：版本 → 资源）
+        tree_wrap, tree_body = card(self, "发布列表（右键资源直接用浏览器下载）")
+        tree_wrap.pack(fill="both", expand=True)
+        self.tree = ttk.Treeview(tree_body, columns=("size", "downloads"), show="tree headings", height=14)
+        self.tree.heading("#0", text="版本 / 资源", anchor="w")
+        self.tree.heading("size", text="大小", anchor="w")
+        self.tree.heading("downloads", text="下载次数", anchor="w")
+        self.tree.column("#0", width=460, stretch=True)
+        self.tree.column("size", width=100, stretch=False, anchor="w")
+        self.tree.column("downloads", width=100, stretch=False, anchor="w")
+        vsb = ttk.Scrollbar(tree_body, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+        self.tree.tag_configure("release", foreground=COLORS["purple"], font=("Microsoft YaHei UI", 10, "bold"))
+        self.tree.tag_configure("asset", foreground="#c9c6de")
+        # 右键菜单
+        self.menu = tk.Menu(self, tearoff=0)
+        self.tree.bind("<Button-3>", self._on_right_click)
 
     def _search(self):
-        text = self.repo_input.text().strip()
-        # 兼容 owner/repo、完整 GitHub URL、git@ 地址
-        text = text.strip().rstrip("/")
+        text = self.repo_var.get().strip().rstrip("/")
         if text.startswith("https://github.com/"):
             text = text[len("https://github.com/"):]
         elif text.startswith("http://github.com/"):
@@ -91,80 +65,70 @@ class ReleasesPage(QWidget):
             text = text[len("git@github.com:"):]
         parts = [p for p in text.split("/") if p]
         if len(parts) < 2:
-            QMessageBox.information(self, "提示", "请按 owner/repo 格式输入，如 tidain/YunX-Desktop")
+            messagebox.showinfo("提示", "请按 owner/repo 格式输入，如 tidain/YunX-Desktop", parent=self)
             return
         owner, repo = parts[0], parts[1]
         if repo.endswith(".git"):
             repo = repo[:-4]
-        self.search_btn.setEnabled(False)
-        self.search_btn.setText("查询中…")
+        self.search_btn.configure(state="disabled", text="查询中…")
         self.service.fetch_releases(owner, repo)
 
     def _on_releases(self, releases, owner, repo):
-        self.search_btn.setEnabled(True)
-        self.search_btn.setText("查询 Releases")
+        self.search_btn.configure(state="normal", text="查询 Releases")
         self._releases = releases
-        self.tree.clear()
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+        self._tree_data.clear()
         if not releases:
-            QMessageBox.warning(self, "无结果", f"没有获取到 {owner}/{repo} 的 Releases，可能仓库不存在或网络受限")
+            messagebox.showwarning("无结果", f"没有获取到 {owner}/{repo} 的 Releases，可能仓库不存在或网络受限", parent=self)
             return
         for rel in releases:
-            top = QTreeWidgetItem([f"{rel.tag}  {rel.name}", "", rel.published_at])
-            top.setData(0, Qt.ItemDataRole.UserRole, ("release", rel))
-            top.setForeground(0, QColor("#a792ff"))
-            top_font = top.font(0)
-            top_font.setBold(True)
-            top_font.setPointSize(11)
-            top.setFont(0, top_font)
-            for col in range(3):
-                top.setSizeHint(col, QSize(120, 34))  # 版本行更高
+            top = self.tree.insert("", "end", text=f"{rel.tag}  {rel.name}",
+                                   values=("", rel.published_at), tags=("release",), open=True)
             for asset in rel.assets:
-                child = QTreeWidgetItem([
-                    asset.name,
-                    f"{asset.size / 1048576:.1f} MB",
-                    str(asset.downloads),
-                ])
-                child.setData(0, Qt.ItemDataRole.UserRole, ("asset", asset))
-                child.setData(3, Qt.ItemDataRole.UserRole, rel.tag)
-                child.setForeground(0, QColor("#c9c6de"))
-                for col in range(3):
-                    child.setSizeHint(col, QSize(120, 30))  # 资源行 30px，不再挤成一团
-                top.addChild(child)
-            self.tree.addTopLevelItem(top)
-            top.setExpanded(True)
+                child = self.tree.insert(top, "end", text=asset.name,
+                                         values=(f"{asset.size / 1048576:.1f} MB", str(asset.downloads)),
+                                         tags=("asset",))
+                self._tree_data[child] = asset
 
-    def _context_menu(self, pos):
-        item = self.tree.itemAt(pos)
-        if not item:
+    def _on_right_click(self, event):
+        item = self.tree.identify_row(event.y)
+        if not item or item not in self._tree_data:
             return
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not data or data[0] != "asset":
-            return
-        asset = data[1]
-        menu = QMenu(self)
+        asset = self._tree_data[item]
+        self.tree.selection_set(item)
+        # 重建菜单
+        self.menu.delete(0, "end")
         nodes = [n for n in self.service.nodemgr.results if n.ok][:8]
         if not nodes:
             nodes = self.service.nodemgr.results[:8]
-        # 首选：直接用默认浏览器打开下载
         for node in nodes:
-            menu.addAction(f"用 {node.name} 下载（浏览器）", lambda n=node: self._open_download(n, asset))
-        # 备选：复制链接
-        copy_menu = menu.addMenu("复制加速链接…")
+            self.menu.add_command(label=f"用 {node.name} 下载（浏览器）",
+                                  command=lambda n=node, a=asset: self._open_download(n, a))
+        self.menu.add_separator()
+        sub = tk.Menu(self.menu, tearoff=0)
         for node in nodes:
-            copy_menu.addAction(node.name, lambda n=node: self._copy_link(n, asset))
-        menu.addAction("复制原始 GitHub 直链", lambda: self._copy_raw(asset))
-        menu.exec(self.tree.viewport().mapToGlobal(pos))
+            sub.add_command(label=node.name, command=lambda n=node, a=asset: self._copy_link(n, a))
+        self.menu.add_cascade(label="复制加速链接…", menu=sub)
+        self.menu.add_command(label="复制原始 GitHub 直链", command=lambda a=asset: self._copy_raw(a))
+        try:
+            self.menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.menu.grab_release()
 
     def _open_download(self, node, asset):
-        """用系统默认浏览器打开加速下载链接，直接触发浏览器下载。"""
         url = NodeManager.build_url(node.url, asset.browser_download_url)
-        QDesktopServices.openUrl(QUrl(url))
+        webbrowser.open(url)
 
     def _copy_link(self, node, asset):
         url = NodeManager.build_url(node.url, asset.browser_download_url)
-        QApplication.clipboard().setText(url)
-        QMessageBox.information(self, "已复制", f"加速链接已复制：\n{url}")
+        self.clipboard_clear()
+        self.clipboard_append(url)
+        self.update()
+        messagebox.showinfo("已复制", f"加速链接已复制：\n{url}", parent=self)
 
     def _copy_raw(self, asset):
-        QApplication.clipboard().setText(asset.browser_download_url)
-        QMessageBox.information(self, "已复制", f"原始直链已复制：\n{asset.browser_download_url}")
+        self.clipboard_clear()
+        self.clipboard_append(asset.browser_download_url)
+        self.update()
+        messagebox.showinfo("已复制", f"原始直链已复制：\n{asset.browser_download_url}", parent=self)

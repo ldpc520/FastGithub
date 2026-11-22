@@ -1,263 +1,204 @@
-"""主窗口：左侧导航 + 页面栈 + 系统托盘。"""
+"""主窗口：左侧导航 + 页面切换 + 顶部标题栏/提示条 + 系统托盘。"""
 from __future__ import annotations
 
-import sys
 import os
-
-from PyQt6.QtCore import Qt, QTimer, QPointF
-from PyQt6.QtGui import QBrush, QColor, QIcon, QPainter, QPixmap, QPolygonF
-from PyQt6.QtWidgets import (
-    QApplication,
-    QButtonGroup,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QMainWindow,
-    QMenu,
-    QPushButton,
-    QStackedWidget,
-    QSystemTrayIcon,
-    QVBoxLayout,
-    QWidget,
-)
+import sys
+import threading
+import tkinter as tk
+from tkinter import ttk
 
 from core.loghub import log
+from ui.theme import DARK, COLORS
 from ui.pages.dashboard import DashboardPage
-from ui.pages.directlink_page import DirectLinkPage
-from ui.pages.logs_page import LogsPage
 from ui.pages.nodes_page import NodesPage
 from ui.pages.releases_page import ReleasesPage
+from ui.pages.directlink_page import DirectLinkPage
+from ui.pages.logs_page import LogsPage
 from ui.pages.settings_page import SettingsPage
 
 
-def _icon_path() -> str:
+def _resource(name: str) -> str:
     """兼容源码运行与 PyInstaller 打包后的资源路径。"""
     if getattr(sys, "frozen", False):
         base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     else:
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, "resources", "app.ico")
+    return os.path.join(base, "resources", name)
 
 
-def make_icon() -> QIcon:
-    """优先加载生成的 ico 图标，读取失败则回退到代码绘制。"""
-    path = _icon_path()
-    if os.path.exists(path):
-        icon = QIcon(path)
-        if not icon.isNull():
-            return icon
-    # 回退：代码绘制
-    pix = QPixmap(64, 64)
-    pix.fill(QColor(0, 0, 0, 0))
-    p = QPainter(pix)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setBrush(QBrush(QColor("#4f6bff")))
-    p.setPen(Qt.PenStyle.NoPen)
-    p.drawEllipse(4, 4, 56, 56)
-    p.setBrush(QBrush(QColor("#ffffff")))
-    # 闪电
-    pts = [
-        QPointF(36, 12),
-        QPointF(20, 36),
-        QPointF(31, 36),
-        QPointF(27, 53),
-        QPointF(45, 28),
-        QPointF(34, 28),
-    ]
-    p.drawPolygon(QPolygonF(pts))
-    p.end()
-    return QIcon(pix)
-
-
-class MainWindow(QMainWindow):
+class MainWindow:
+    # (key, 显示名, tkwebui 内置图标名, 页面类, 标题, 副标题)
     PAGES = [
-        ("总览", "📊", DashboardPage),
-        ("加速节点", "🌐", NodesPage),
-        ("Releases", "📦", ReleasesPage),
-        ("直链转换", "🔗", DirectLinkPage),
-        ("日志", "📝", LogsPage),
-        ("设置", "⚙", SettingsPage),
+        ("dashboard", "总览", "speed", DashboardPage,
+         "加速总览", "一键启停本地代理，查看实时流量与域名 IP 优选结果"),
+        ("nodes", "加速节点", "sources", NodesPage,
+         "GitHub 加速节点", "github.akams.cn 公开节点测速，一键生成加速下载链接"),
+        ("releases", "Releases", "download", ReleasesPage,
+         "Releases 加速下载", "查询仓库发布列表，右键资源用节点加速下载"),
+        ("directlink", "直链转换", "edit", DirectLinkPage,
+         "GitHub 直链转换", "把文件页链接转成 raw 直链，支持批量与加速代理"),
+        ("logs", "日志", "library", LogsPage,
+         "运行日志", "实时日志流，排障与状态追踪"),
+        ("settings", "设置", "settings", SettingsPage,
+         "设置", "启动、代理、IP 更新与目录诊断"),
     ]
 
-    def __init__(self, service, minimized=False):
-        super().__init__()
+    def __init__(self, root: tk.Tk, service):
+        self.root = root
         self.service = service
-        self.setWindowTitle("FastGithubPy - GitHub 加速工具箱")
-        self.setWindowIcon(make_icon())
-        self.resize(1060, 720)
-        self.setMinimumSize(900, 620)
-        self._drag_pos = None
+        self._tray = None
         self._build_ui()
         self._build_tray()
-        self._connect()
-        if minimized or service.cfg.get("minimize_to_tray", True):
-            QTimer.singleShot(100, self.hide)
-        else:
-            self.show()
+        # 定时把 core 线程的信号派发到 UI 主线程
+        self._pump()
 
-        # 启动后自动刷新 IP
-        if service.cfg.get("auto_start_refresh", True):
-            QTimer.singleShot(15000, service.refresh_ips)
-
+    # ---------- 构建 ----------
     def _build_ui(self):
-        central = QWidget()
-        central.setObjectName("root")
-        self.setCentralWidget(central)
-        layout = QHBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        root = self.root
+        root.title("FastGithubPy - GitHub 加速工具箱")
+        root.geometry("1080x740")
+        root.minsize(920, 640)
+        ico = _resource("app.ico")
+        if os.path.exists(ico):
+            try:
+                root.iconbitmap(ico)
+            except Exception:
+                pass
 
-        # 侧边栏
-        sidebar = QFrame()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(190)
-        sl = QVBoxLayout(sidebar)
-        sl.setContentsMargins(0, 16, 0, 12)
-        sl.setSpacing(2)
+        main = ttk.Frame(root)
+        main.pack(fill="both", expand=True)
+        main.columnconfigure(1, weight=1)
+        main.rowconfigure(0, weight=1)
 
-        title = QLabel("FastGithubPy")
-        title.setObjectName("appTitle")
-        sub = QLabel("GitHub 加速工具箱")
-        sub.setObjectName("appSub")
-        sl.addWidget(title)
-        sl.addWidget(sub)
+        # 左侧导航（手动按钮，便于控制文字与配色）
+        sidebar = ttk.Frame(main, width=190, style="Sidebar.TFrame")
+        sidebar.grid(row=0, column=0, sticky="nsew")
+        sidebar.pack_propagate(False)
 
-        line = QFrame()
-        line.setObjectName("divider")
-        sl.addWidget(line)
+        ttk.Label(sidebar, text="FastGithubPy", style="Strong.TLabel",
+                  font=("Microsoft YaHei UI", 15, "bold")).pack(anchor="w", padx=16, pady=(18, 0))
+        ttk.Label(sidebar, text="GitHub 加速工具箱", style="Muted.TLabel").pack(anchor="w", padx=16)
+        ttk.Frame(sidebar, height=1, style="Sidebar.TFrame").pack(fill="x", padx=12, pady=14)
 
-        self.nav_group = QButtonGroup(self)
-        self.nav_group.setExclusive(True)
-        self.stack = QStackedWidget()
-        for i, (name, emoji, cls) in enumerate(self.PAGES):
-            btn = QPushButton(f" {emoji}   {name}")
-            btn.setObjectName("nav")
-            btn.setCheckable(True)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.nav_group.addButton(btn, i)
-            sl.addWidget(btn)
-            page = cls(self.service)
-            self.stack.addWidget(page)
+        self.nav_buttons: dict[str, ttk.Button] = {}
+        self.nav_key_to_btn: dict[str, ttk.Button] = {}
+        for key, label, _icon, _cls, _t, _s in self.PAGES:
+            b = ttk.Button(sidebar, text=f"  {label}", style="Nav.TButton",
+                           command=lambda k=key: self.show_page(k))
+            b.pack(fill="x", padx=10, pady=2)
+            self.nav_buttons[key] = b
+        ttk.Label(sidebar, text="v1.0", style="Muted.TLabel").pack(side="bottom", pady=12)
 
-        sl.addStretch(1)
-        self.nav_group.buttonClicked.connect(self._on_nav)
-        self.nav_group.button(0).setChecked(True)
+        # 右侧内容区
+        right = ttk.Frame(main)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.rowconfigure(3, weight=1)
+        right.columnconfigure(0, weight=1)
 
-        version = QLabel("v1.0")
-        version.setObjectName("muted")
-        version.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sl.addWidget(version)
+        # 顶部标题 + 副标题
+        header = ttk.Frame(right)
+        header.grid(row=0, column=0, sticky="ew", padx=20, pady=(16, 10))
+        self.header_title = ttk.Label(header, text="加速总览", style="Strong.TLabel",
+                                      font=("Microsoft YaHei UI", 17, "bold"))
+        self.header_title.pack(anchor="w")
+        self.header_sub = ttk.Label(header, text="一键启停本地代理，查看实时流量与域名 IP 优选结果",
+                                    style="Muted.TLabel")
+        self.header_sub.pack(anchor="w", pady=(3, 0))
 
-        layout.addWidget(sidebar)
+        # 黄色提示条
+        notice = ttk.Frame(right, padding=(12, 8), style="Notice.TFrame")
+        notice.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 12))
+        ttk.Label(notice, text="⚠", foreground=COLORS["yellow"],
+                  background="#3a3320", font=("Microsoft YaHei UI", 14)).pack(side="left")
+        ttk.Label(notice, style="Warn.TLabel", background="#3a3320",
+                  text="首次使用请点「更新 IP」测速，再点「启动加速」；程序会自动设置/还原系统代理。",
+                  wraplength=780, justify="left").pack(side="left", padx=8)
 
-        # 右侧：顶部标题栏 + 提示条 + 页面栈
-        right = QFrame()
-        right.setObjectName("content")
-        rl = QVBoxLayout(right)
-        rl.setContentsMargins(16, 14, 16, 14)
-        rl.setSpacing(12)
+        # 页面容器
+        self.pages: dict[str, tk.Widget] = {}
+        self.container = ttk.Frame(right)
+        self.container.grid(row=3, column=0, sticky="nsew", padx=20, pady=(0, 16))
+        self.container.columnconfigure(0, weight=1)
+        self.container.rowconfigure(0, weight=1)
+        for key, _label, _icon, cls, _t, _s in self.PAGES:
+            page = cls(self.service, master=self.container)
+            page.grid(row=0, column=0, sticky="nsew")
+            self.pages[key] = page
 
-        header = QFrame()
-        header.setObjectName("header")
-        hl = QVBoxLayout(header)
-        hl.setContentsMargins(16, 10, 16, 10)
-        hl.setSpacing(3)
-        self.header_title = QLabel("GitHub 加速工具箱")
-        self.header_title.setObjectName("h1")
-        self.header_sub = QLabel("本地代理 + 官方 IP 优选 + ghproxy 节点聚合")
-        self.header_sub.setObjectName("muted")
-        hl.addWidget(self.header_title)
-        hl.addWidget(self.header_sub)
-        rl.addWidget(header)
-
-        notice = QFrame()
-        notice.setObjectName("notice")
-        nl = QHBoxLayout(notice)
-        nl.setContentsMargins(12, 8, 12, 8)
-        warn = QLabel("⚠")
-        warn.setStyleSheet("font-size: 16px; color: #e8c05a;")
-        ntext = QLabel("首次使用请点「更新 IP」测速，再点「启动加速」；程序会自动设置/还原系统代理。")
-        ntext.setObjectName("noticeText")
-        ntext.setWordWrap(True)
-        nl.addWidget(warn)
-        nl.addWidget(ntext, 1)
-        rl.addWidget(notice)
-
-        rl.addWidget(self.stack, 1)
-        layout.addWidget(right, 1)
-        self.setStyleSheet(self.styleSheet())
-
-    def _build_tray(self):
-        icon = make_icon()
-        self.tray = QSystemTrayIcon(icon, self)
-        self.tray.setToolTip("FastGithubPy")
-        menu = QMenu()
-        show_act = menu.addAction("显示主界面")
-        show_act.triggered.connect(self._show_window)
-        self.toggle_act = menu.addAction("启动加速")
-        self.toggle_act.triggered.connect(self._toggle_proxy)
-        refresh_act = menu.addAction("更新 IP")
-        refresh_act.triggered.connect(self.service.refresh_ips)
-        menu.addSeparator()
-        quit_act = menu.addAction("退出")
-        quit_act.triggered.connect(self._quit)
-        self.tray.setContextMenu(menu)
-        self.tray.activated.connect(self._on_tray_activated)
-        self.tray.show()
         self.service.proxy_state_signal.connect(self._on_proxy_state)
+        self.show_page(self.PAGES[0][0])
 
-    def _connect(self):
-        pass
+        # 关闭按钮 → 隐藏到托盘
+        root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    HEADER_TEXT = {
-        0: ("加速总览", "一键启停本地代理，查看实时流量与域名 IP 优选结果"),
-        1: ("GitHub 加速节点", "github.akams.cn 公开节点测速，一键生成加速下载链接"),
-        2: ("Releases 加速下载", "查询仓库发布列表，右键资源用节点生成加速链接"),
-        3: ("GitHub 直链转换", "把文件页链接转成 raw 直链，支持批量与加速代理"),
-        4: ("运行日志", "实时日志流，排障与状态追踪"),
-        5: ("设置", "启动、代理、IP 更新与目录诊断"),
-    }
+    def show_page(self, key: str):
+        page = self.pages.get(key)
+        if not page:
+            return
+        page.tkraise()
+        for item in self.PAGES:
+            k = item[0]
+            self.nav_buttons[k].configure(style="Selected.Nav.TButton" if k == key else "Nav.TButton")
+        for item in self.PAGES:
+            if item[0] == key:
+                self.header_title.configure(text=item[4])
+                self.header_sub.configure(text=item[5])
+                break
+        # 切到设置页时刷新系统代理状态（避免显示过期）
+        refresher = getattr(page, "refresh_sysproxy_status", None)
+        if refresher:
+            refresher()
 
-    def _on_nav(self, btn):
-        idx = self.nav_group.id(btn)
-        self.stack.setCurrentIndex(idx)
-        title, sub = self.HEADER_TEXT.get(idx, ("", ""))
-        self.header_title.setText(title)
-        self.header_sub.setText(sub)
+    # ---------- 托盘 ----------
+    def _build_tray(self):
+        try:
+            from ui.tray import TrayController
+            self._tray = TrayController(self)
+            self._tray.start()
+        except Exception as exc:
+            log.warn(f"系统托盘不可用（不影响主界面）：{exc}")
+            self._tray = None
 
-    def _on_tray_activated(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            self._show_window()
-
-    def _show_window(self):
-        self.showNormal()
-        self.raise_()
-        self.activateWindow()
-
-    def _toggle_proxy(self):
+    def toggle_proxy(self):
         if self.service.proxy.running:
             self.service.stop_proxy()
         else:
             self.service.start_proxy()
 
     def _on_proxy_state(self, running, port):
-        self.toggle_act.setText("停止加速" if running else "启动加速")
-        if self.service.cfg.get("tray_notify", True):
-            self.tray.showMessage(
+        if self._tray:
+            self._tray.update_state(running, port)
+        if self.service.cfg.get("tray_notify", True) and self._tray:
+            self._tray.notify(
                 "FastGithubPy",
                 f"加速服务已{'启动' if running else '停止'}" + (f"（端口 {port}）" if running else ""),
-                make_icon(),
-                2500,
             )
 
-    def _quit(self):
-        self.service.shutdown()
-        self.tray.hide()
-        QApplication.instance().quit()
+    def show_window(self):
+        self.root.after(0, self.root.deiconify)
 
-    def closeEvent(self, event):
-        # 关闭按钮隐藏到托盘，不真正退出
-        event.ignore()
-        self.hide()
-        if self.service.cfg.get("tray_notify", True):
-            self.tray.showMessage("FastGithubPy", "已最小化到托盘", make_icon(), 2000)
+    def quit_app(self):
+        try:
+            if self._tray:
+                self._tray.stop()
+        except Exception:
+            pass
+        try:
+            self.service.shutdown()
+        except Exception:
+            pass
+        self.root.after(0, self.root.destroy)
+
+    def _on_close(self):
+        # 关闭窗口隐藏到托盘；托盘不可用时直接退出
+        if self._tray:
+            self.root.withdraw()
+            if self.service.cfg.get("tray_notify", True):
+                self._tray.notify("FastGithubPy", "已最小化到托盘")
+        else:
+            self.quit_app()
+
+    # ---------- 信号泵 ----------
+    def _pump(self):
+        self.service.pump_all(limit=300)
+        self.root.after(50, self._pump)

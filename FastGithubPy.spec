@@ -8,13 +8,14 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 hiddenimports = []
 hiddenimports += collect_submodules("aiohttp")
-hiddenimports += collect_submodules("PyQt6")
-hiddenimports += ["pyqtgraph", "numpy"]
+hiddenimports += collect_submodules("tkwebui")   # tkwebui 各组件按需动态导入
+hiddenimports += collect_submodules("pystray")
+hiddenimports += collect_submodules("PIL")
+hiddenimports += ["tkinter"]
 
 datas = []
 datas += collect_data_files("aiohttp")
 datas += [("resources/app.ico", "resources")]  # 软件图标
-datas += [("resources/qtbase_zh_CN.qm", "resources")]  # Qt 控件中文翻译（右键菜单等）
 
 a = Analysis(
     ["main.py"],

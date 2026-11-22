@@ -1,12 +1,15 @@
-"""应用服务层：统一管理后端组件，给用户界面提供简洁的线程安全接口。"""
+"""应用服务层：统一管理后端组件，给用户界面提供简洁的线程安全接口。
+
+无 GUI 框架依赖：事件通过 core.signal.Signal 广播，UI 线程定时 pump。
+"""
 from __future__ import annotations
 
 import asyncio
 import sys
-from typing import Any, Callable
+import threading
+from typing import Callable
 
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
-
+from .signal import Signal, SignalBus
 from .config import Config
 from .githubapi import GithubApi, Release
 from .ipprobe import IpManager
@@ -17,19 +20,21 @@ from . import systemproxy
 from . import pac as pacmod
 
 
-class AsyncWorker(QThread):
+class AsyncWorker(threading.Thread):
     """承载独立 asyncio 事件循环的后台线程。"""
-    loop_ready = pyqtSignal(object)
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def __init__(self, on_ready: Callable | None = None):
+        super().__init__(daemon=True, name="FastGithubPy-async")
         self.loop: asyncio.AbstractEventLoop | None = None
-        self._stop = asyncio.Event() if False else None
+        self._ready = threading.Event()
+        self._on_ready = on_ready
 
     def run(self):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        self.loop_ready.emit(self.loop)
+        self._ready.set()
+        if self._on_ready:
+            self._on_ready(self.loop)
         self.loop.run_forever()
         pending = asyncio.all_tasks(self.loop)
         for t in pending:
@@ -37,8 +42,13 @@ class AsyncWorker(QThread):
         self.loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         self.loop.close()
 
+    def wait_ready(self, timeout: float = 5.0) -> bool:
+        return self._ready.wait(timeout)
+
     def submit(self, coro, callback: Callable | None = None):
-        """从 UI 线程提交协程，完成后回调（主线程）。"""
+        """从 UI 线程提交协程，完成后回调（回调在 worker 线程执行，emit 入队）。"""
+        if not self.loop:
+            self.wait_ready()
         if not self.loop:
             return
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
@@ -52,40 +62,41 @@ class AsyncWorker(QThread):
             future.add_done_callback(done)
 
     def stop_loop(self):
-        if self.loop:
+        if self.loop and self.loop.is_running():
             self.loop.call_soon_threadsafe(self.loop.stop)
 
 
-class AppService(QObject):
-    # 信号
-    log_signal = pyqtSignal(str, str)
-    stats_signal = pyqtSignal(object)
-    proxy_state_signal = pyqtSignal(bool, int)
-    refresh_done_signal = pyqtSignal(object)
-    node_progress_signal = pyqtSignal(int, int)
-    nodes_done_signal = pyqtSignal(object)
-    releases_done_signal = pyqtSignal(object, str, str)
+class AppService(SignalBus):
+    """后端服务聚合，对外提供信号（由 UI pump）与操作方法。"""
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    SIGNAL_NAMES = (
+        "log_signal",           # (level, line)
+        "stats_signal",         # (stats)
+        "proxy_state_signal",   # (running, port)
+        "refresh_done_signal",  # (result)
+        "node_progress_signal", # (done, total)
+        "nodes_done_signal",    # (results)
+        "releases_done_signal", # (releases, owner, repo)
+    )
+
+    def __init__(self):
+        super().__init__(*self.SIGNAL_NAMES)
         self.cfg = Config()
         self.ipmgr = IpManager(self.cfg)
         self.proxy = LocalProxy(self.cfg, self.ipmgr)
         self.nodemgr = NodeManager()
         self.github = GithubApi(self.cfg)
-        self.worker = AsyncWorker(self)
+        self.worker = AsyncWorker(on_ready=self._on_loop_ready)
         self._proxy_backup: dict = {}
         self._actual_port = int(self.cfg.get("proxy_port", 38457))
 
         log.set_callback(lambda level, line: self.log_signal.emit(level, line))
         self.proxy.set_stats_callback(lambda stats: self.stats_signal.emit(stats))
 
-        # 启动自检：清除上次异常退出（如重启电脑）残留的系统代理，
-        # 防止程序未运行时代理仍开着导致全网断网。不影响用户自己的代理。
+        # 启动自检：清除上次异常退出残留的系统代理（仅本程序残留）。
         if sys.platform == "win32":
             systemproxy.clear_stale_proxy(self._actual_port)
 
-        self.worker.loop_ready.connect(self._on_loop_ready)
         self.worker.start()
 
     def _on_loop_ready(self, loop):
@@ -100,7 +111,6 @@ class AppService(QObject):
 
         def done(port):
             self.proxy_state_signal.emit(True, port)
-            # 按配置应用系统代理模式（Windows）
             if sys.platform == "win32":
                 mode = self.cfg.get("proxy_mode", "pac")
                 if mode == "pac":
@@ -108,7 +118,6 @@ class AppService(QObject):
                     systemproxy.set_pac_proxy(True, url)
                 elif mode == "global":
                     systemproxy.set_system_proxy(True, f"127.0.0.1:{port}", self._proxy_backup)
-                # off: 不改系统代理，用户自行配置
             log.info(f"加速服务运行中，代理端口 {port}，模式 {self.cfg.get('proxy_mode', 'pac')}")
 
         self.worker.submit(task(), done)
@@ -126,14 +135,16 @@ class AppService(QObject):
                 elif mode == "global":
                     systemproxy.set_system_proxy(False, backup=self._proxy_backup)
                     self._proxy_backup = {}
-                # off: 未改过系统设置，无需清理
             log.info("加速服务已停止")
 
         self.worker.submit(task(), done)
 
     def refresh_ips(self, timeout_budget: float = 45.0):
         log.info("开始刷新 IP 测速…")
-        self.worker.submit(self.ipmgr.refresh_all(timeout_budget), lambda r: self.refresh_done_signal.emit(r))
+        self.worker.submit(
+            self.ipmgr.refresh_all(timeout_budget),
+            lambda r: self.refresh_done_signal.emit(r),
+        )
 
     # ---------- 节点测速 ----------
     def test_nodes(self):

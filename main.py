@@ -1,63 +1,42 @@
-"""FastGithubPy 入口：用 PyQt6 复刻 FastGithub 界面 + github.akams.cn 节点功能。"""
+"""FastGithubPy 入口：tkinter + tkwebui 界面 + github.akams.cn 节点功能。"""
 from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
-
-from PyQt6.QtCore import Qt, QTranslator, QLibraryInfo
-from PyQt6.QtWidgets import QApplication
+import tkinter as tk
 
 # 允许以脚本方式直接运行（core / ui 包在项目根目录）
 sys.path.insert(0, str(__file__).rsplit("\\", 1)[0] if "\\" in __file__ else ".")
 
+from core.loghub import log
 from core.service import AppService
+from ui.theme import apply_dark_theme
 from ui.main_window import MainWindow
-from ui.theme import apply_theme
-
-
-def _install_chinese_translators(app: QApplication):
-    """加载 Qt 中文翻译：让输入框右键菜单、对话框按钮等标准控件全变中文。
-
-    兼容源码运行与 PyInstaller 打包（sys._MEIPASS）两种路径。
-    """
-    candidates = []
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        candidates.append(os.path.join(meipass, "resources"))
-    candidates.append(str(Path(__file__).resolve().parent / "resources"))
-    try:
-        candidates.append(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath))
-    except Exception:
-        pass
-
-    loaded = []
-    for qm in ("qtbase_zh_CN.qm", "qt_zh_CN.qm"):
-        for d in candidates:
-            p = os.path.join(d, qm)
-            if not os.path.isfile(p):
-                continue
-            tr = QTranslator(app)
-            if tr.load(p) and app.installTranslator(tr):
-                loaded.append(tr)  # 保持引用，否则翻译会被 GC 回收失效
-                break
-    app._zh_translators = loaded
 
 
 def main():
-    QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-    )
-    app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
-    _install_chinese_translators(app)
-    apply_theme(app)
+    from tkwebui import enable_dpi_awareness
+
+    enable_dpi_awareness()
+    root = tk.Tk()
+    apply_dark_theme(root)
 
     service = AppService()
-    minimized = "--minimized" in sys.argv
-    window = MainWindow(service, minimized=minimized)
+    window = MainWindow(root, service)
 
-    sys.exit(app.exec())
+    # 启动后约 15 秒自动刷新 IP
+    if service.cfg.get("auto_start_refresh", True):
+        root.after(15000, service.refresh_ips)
+
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            service.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

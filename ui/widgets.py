@@ -1,81 +1,69 @@
-"""可复用 UI 控件：卡片、开关行、指标卡。"""
+"""可复用 UI 控件（基于 tkwebui）：卡片、指标卡、表格、开关行、提示条。"""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QCheckBox,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QSizePolicy,
-    QVBoxLayout,
-    QWidget,
-)
+import tkinter as tk
+from tkinter import ttk
+
+from tkwebui import Card, PALETTE
+from .theme import COLORS
 
 
-def card(title: str | None = None) -> tuple[QFrame, QVBoxLayout]:
-    frame = QFrame()
-    frame.setObjectName("card")
-    frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-    layout = QVBoxLayout(frame)
-    layout.setContentsMargins(16, 14, 16, 14)
-    layout.setSpacing(10)
+def card(master, title: str | None = None, **kwargs) -> tuple[Card, ttk.Frame]:
+    """返回 (卡片, 内容 frame)。用法：body = card(parent, '标题')[1]。"""
+    wrap = Card(master, padding=14, **kwargs)
+    body = ttk.Frame(wrap)
+    body.pack(fill="both", expand=True)
     if title:
-        lbl = QLabel(title)
-        lbl.setObjectName("h2")
-        layout.addWidget(lbl)
-    return frame, layout
+        ttk.Label(body, text=title, style="Strong.TLabel").pack(anchor="w", pady=(0, 10))
+    return wrap, body
 
 
-def metric_card(title: str, value: str = "-", accent: str = "#4f6bff") -> tuple[QFrame, QLabel]:
-    frame = QFrame()
-    frame.setObjectName("card")
-    frame.setMinimumHeight(86)
-    layout = QVBoxLayout(frame)
-    layout.setContentsMargins(16, 12, 16, 12)
-    layout.setSpacing(4)
-    t = QLabel(title)
-    t.setObjectName("muted")
-    v = QLabel(value)
-    v.setObjectName("h1")
-    v.setStyleSheet(f"color: {accent};")
-    layout.addWidget(t)
-    layout.addWidget(v)
-    return frame, v
+def metric_card(master, title: str, value: str = "-", accent: str | None = None) -> tuple[Card, ttk.Label]:
+    """指标卡：标题 + 大号数值。"""
+    wrap = Card(master, padding=14)
+    ttk.Label(wrap, text=title, style="Muted.TLabel").pack(anchor="w")
+    v = ttk.Label(wrap, text=value, style="Strong.TLabel", font=("Microsoft YaHei UI", 16, "bold"))
+    if accent:
+        v.configure(foreground=accent)
+    v.pack(anchor="w", pady=(6, 0))
+    return wrap, v
 
 
-def divider() -> QFrame:
-    line = QFrame()
-    line.setObjectName("divider")
-    line.setFixedHeight(1)
+def make_table(master, columns: list[tuple[str, str, int]], height: int = 10):
+    """创建只读表格 + 滚动条。columns: [(id, 表头, 宽度), ...]，返回 (frame, tree)。"""
+    frame = ttk.Frame(master)
+    cols = [c[0] for c in columns]
+    tree = ttk.Treeview(frame, columns=cols, show="headings", height=height,
+                        selectmode="browse")
+    vsb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=vsb.set)
+    tree.pack(side="left", fill="both", expand=True)
+    vsb.pack(side="right", fill="y")
+    for cid, heading, width in columns:
+        tree.heading(cid, text=heading, anchor="w")
+        tree.column(cid, width=width, anchor="w", stretch=(cid == cols[-1]))
+    # 交替行颜色
+    tree.tag_configure("oddrow", background="#242038")
+    return frame, tree
+
+
+def toggle_row(master, title: str, description: str = "", checked: bool = False,
+               on_change=None) -> tuple[ttk.Frame, tk.BooleanVar]:
+    """开关行：左侧标题+描述，右侧开关。返回 (frame, BooleanVar)。"""
+    row = ttk.Frame(master, padding=(6, 8))
+    left = ttk.Frame(row)
+    left.pack(side="left", fill="x", expand=True)
+    ttk.Label(left, text=title).pack(anchor="w")
+    if description:
+        ttk.Label(left, text=description, style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
+    var = tk.BooleanVar(value=checked)
+    chk = ttk.Checkbutton(row, variable=var, command=on_change, text="")
+    chk.pack(side="right")
+    return row, var
+
+
+def divider(master) -> ttk.Frame:
+    """1px 分隔线。"""
+    line = ttk.Frame(master, height=1, style="Sidebar.TFrame")
+    line.pack(fill="x", pady=2)
     return line
-
-
-class ToggleRow(QWidget):
-    def __init__(self, title: str, description: str = "", checked: bool = False, parent=None):
-        super().__init__(parent)
-        self.setMinimumHeight(52)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 8, 0, 8)
-        layout.setSpacing(10)
-        # 标题与描述合并为一个富文本标签，避免嵌套布局高度计算异常
-        text = f"<b>{title}</b>"
-        if description:
-            text += f'<br><span style="color:#8b86a8;font-size:11px;">{description}</span>'
-        self.title = QLabel(text)
-        self.title.setTextFormat(Qt.TextFormat.RichText)
-        self.title.setWordWrap(True)
-        self.title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        layout.addWidget(self.title, 1)
-        self.check = QCheckBox()
-        self.check.setChecked(checked)
-        self.check.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        layout.addWidget(self.check)
-        if description:
-            self.setToolTip(description)
-
-    def isChecked(self) -> bool:
-        return self.check.isChecked()
-
-    def setChecked(self, value: bool) -> None:
-        self.check.setChecked(value)

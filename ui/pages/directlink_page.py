@@ -1,130 +1,120 @@
 """GitHub 直链转换页：blob 文件页链接 → raw 直链，支持批量、加速代理、实时转换。"""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QGuiApplication
-from PyQt6.QtWidgets import (
-    QComboBox,
-    QHBoxLayout,
-    QLabel,
-    QPlainTextEdit,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+import tkinter as tk
+from tkinter import ttk
 
 from core.directlink import convert_batch
 from ui.widgets import card
 
 
-class DirectLinkPage(QWidget):
-    def __init__(self, service, parent=None):
-        super().__init__(parent)
+class DirectLinkPage(ttk.Frame):
+    def __init__(self, service, master=None):
+        super().__init__(master)
         self.service = service
         self._build_ui()
-        self._connect()
+        self.service.nodes_done_signal.connect(self._on_nodes_done)
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 18)
-        root.setSpacing(14)
+        # 输入区
+        in_wrap, in_body = card(self, "粘贴 GitHub 链接（支持多行批量，每行一个）")
+        in_wrap.pack(fill="both", expand=True, pady=(0, 14))
+        self.input = tk.Text(in_body, height=6, wrap="none", bg="#151822", fg="#d5d3e8",
+                             insertbackground="#d5d3e8", relief="flat", font=("Microsoft YaHei UI", 10))
+        self.input.pack(fill="both", expand=True)
+        self._set_placeholder()
+        self.input.bind("<FocusIn>", self._on_focus_in)
+        self.input.bind("<FocusOut>", self._on_focus_out)
+        self.input.bind("<KeyRelease>", lambda e: self._convert())
 
-        head = QHBoxLayout()
-        title = QLabel("GitHub 直链转换")
-        title.setObjectName("h1")
-        title.setVisible(False)  # 顶部标题栏已显示
-        head.addWidget(title)
-        head.addStretch(1)
-        root.addLayout(head)
+        opt = ttk.Frame(in_body)
+        opt.pack(fill="x", pady=(10, 0))
+        ttk.Label(opt, text="加速代理：").pack(side="left")
+        self.proxy_var = tk.StringVar()
+        self.proxy_combo = ttk.Combobox(opt, textvariable=self.proxy_var, state="readonly", width=42)
+        self.proxy_combo.pack(side="left", padx=(0, 8))
+        self.proxy_combo.bind("<<ComboboxSelected>>", lambda e: self._convert())
+        ttk.Button(opt, text="转换", style="Primary.TButton", command=self._convert).pack(side="left", padx=(0, 6))
+        ttk.Button(opt, text="清空", command=self._clear).pack(side="left", padx=(0, 6))
+        self.copy_btn = ttk.Button(opt, text="复制全部", command=self._copy_all)
+        self.copy_btn.pack(side="left")
 
-        # 输入卡片
-        in_card, in_layout = card("粘贴 GitHub 链接（支持多行批量，每行一个）")
-        self.input = QPlainTextEdit()
-        self.input.setPlaceholderText(
-            "https://github.com/owner/repo/blob/main/path/to/file.txt\n"
-            "https://github.com/owner/repo/tree/main/src"
-        )
-        self.input.setMinimumHeight(150)
-        in_layout.addWidget(self.input)
+        # 输出区
+        out_wrap, out_body = card(self, "转换结果")
+        out_wrap.pack(fill="both", expand=True)
+        ttk.Label(out_body, text="blob/raw 文件页 → raw 直链；tree 目录页 → zip 打包下载；每行一个，实时转换。",
+                  style="Muted.TLabel", wraplength=900).pack(anchor="w", pady=(0, 8))
+        self.output = tk.Text(out_body, height=8, wrap="none", bg="#151822", fg="#7f9dff",
+                              insertbackground="#d5d3e8", relief="flat", font=("Microsoft YaHei UI", 10))
+        vsb = ttk.Scrollbar(out_body, orient="vertical", command=self.output.yview)
+        self.output.configure(yscrollcommand=vsb.set)
+        self.output.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
 
-        opt_row = QHBoxLayout()
-        opt_row.addWidget(QLabel("加速代理："))
-        self.proxy_combo = QComboBox()
-        self.proxy_combo.setMinimumWidth(260)
-        # 数据源与「加速节点」页共享同一份 NodeManager，测速排序后这里同步反映
+        # 输出控件就绪后再填充下拉（会触发 _convert）
         self._fill_proxy_combo()
-        opt_row.addWidget(self.proxy_combo)
-        opt_row.addStretch(1)
-        self.convert_btn = QPushButton("转换")
-        self.convert_btn.setObjectName("primary")
-        self.clear_btn = QPushButton("清空")
-        self.copy_btn = QPushButton("复制全部")
-        opt_row.addWidget(self.convert_btn)
-        opt_row.addWidget(self.clear_btn)
-        opt_row.addWidget(self.copy_btn)
-        in_layout.addLayout(opt_row)
-        root.addWidget(in_card)
 
-        # 输出卡片
-        out_card, out_layout = card("转换结果")
-        hint = QLabel(
-            "blob/raw 文件页 → raw 直链；tree 目录页 → zip 打包下载；每行一个，实时转换。"
-        )
-        hint.setObjectName("muted")
-        hint.setWordWrap(True)
-        out_layout.addWidget(hint)
-        self.output = QPlainTextEdit()
-        self.output.setReadOnly(True)
-        self.output.setMinimumHeight(200)
-        self.output.setPlaceholderText("转换结果会显示在这里")
-        out_layout.addWidget(self.output, 1)
-        root.addWidget(out_card)
+    def _set_placeholder(self):
+        self.input.delete("1.0", "end")
+        self.input.insert("1.0",
+            "https://github.com/owner/repo/blob/main/path/to/file.txt\n"
+            "https://github.com/owner/repo/tree/main/src")
+        self.input.configure(fg="#6f7690")
+        self._placeholder = True
 
-    def _fill_proxy_combo(self):
-        """用加速节点页同一份节点数据填充代理下拉（含「不使用」）。"""
-        current_url = self.proxy_combo.currentData() if hasattr(self, "proxy_combo") else None
-        self.proxy_combo.clear()
-        self.proxy_combo.addItem("不使用（生成原始直链）", "")
+    def _on_focus_in(self, event):
+        if getattr(self, "_placeholder", False):
+            self.input.delete("1.0", "end")
+            self.input.configure(fg="#d5d3e8")
+            self._placeholder = False
+
+    def _on_focus_out(self, event):
+        if not self.input.get("1.0", "end").strip():
+            self._set_placeholder()
+
+    def _fill_proxy_combo(self, keep=None):
+        current = keep or self.proxy_var.get()
+        labels = ["不使用（生成原始直链）"]
+        self._proxy_urls = {"不使用（生成原始直链）": ""}
         for node in self.service.nodemgr.results:
             label = node.name
             if node.ok and node.latency_ms >= 0:
                 label += f"  ·  {node.latency_ms:.0f}ms"
-            self.proxy_combo.addItem(label, node.url)
-        # 尽量恢复之前选中的节点
-        if current_url:
-            idx = self.proxy_combo.findData(current_url)
-            if idx >= 0:
-                self.proxy_combo.setCurrentIndex(idx)
-
-    def _connect(self):
-        self.input.textChanged.connect(self._on_text_changed)
-        self.proxy_combo.currentIndexChanged.connect(self._convert)
-        self.convert_btn.clicked.connect(self._convert)
-        self.clear_btn.clicked.connect(self._clear)
-        self.copy_btn.clicked.connect(self._copy_all)
-        # 加速节点页测速完成后，这里同步刷新节点列表与延迟
-        self.service.nodes_done_signal.connect(self._on_nodes_done)
-
-    def _on_nodes_done(self, _results):
-        self._fill_proxy_combo()
-
-    def _on_text_changed(self):
+            labels.append(label)
+            self._proxy_urls[label] = node.url
+        self.proxy_combo["values"] = labels
+        if current in labels:
+            self.proxy_var.set(current)
+        else:
+            self.proxy_var.set(labels[0])
         self._convert()
 
+    def _on_nodes_done(self, results):
+        self._fill_proxy_combo(keep=self.proxy_var.get())
+
+    def _input_text(self):
+        if getattr(self, "_placeholder", False):
+            return ""
+        return self.input.get("1.0", "end")
+
     def _convert(self):
-        proxy = self.proxy_combo.currentData() or ""
-        result = convert_batch(self.input.toPlainText(), proxy)
-        self.output.setPlainText(result)
+        proxy = self._proxy_urls.get(self.proxy_var.get(), "")
+        result = convert_batch(self._input_text(), proxy)
+        self.output.delete("1.0", "end")
+        if result:
+            self.output.insert("1.0", result)
 
     def _clear(self):
-        self.input.clear()
-        self.output.clear()
+        self.input.delete("1.0", "end")
+        self._placeholder = False
+        self.output.delete("1.0", "end")
 
     def _copy_all(self):
-        text = self.output.toPlainText().strip()
+        text = self.output.get("1.0", "end").strip()
         if not text:
             return
-        QGuiApplication.clipboard().setText(text)
-        self.copy_btn.setText("已复制 ✓")
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(1500, lambda: self.copy_btn.setText("复制全部"))
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update()
+        self.copy_btn.configure(text="已复制 ✓")
+        self.after(1500, lambda: self.copy_btn.configure(text="复制全部"))

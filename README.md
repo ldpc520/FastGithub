@@ -1,6 +1,6 @@
 # FastGithubPy
 
-用 **Python + PyQt6** 复刻 [FastGithub](https://github.com/yuan71058/FastGithub) 的桌面界面，并集成 [github.akams.cn](https://github.akams.cn/) 的公开 ghproxy 节点功能。暗色卡片式界面、系统托盘、本地正向代理 + GitHub IP 测速优选。
+用 **Python + tkinter + tkwebui** 复刻 [FastGithub](https://github.com/yuan71058/FastGithub) 的桌面界面，并集成 [github.akams.cn](https://github.akams.cn/) 的公开 ghproxy 节点功能。暗色卡片式界面、系统托盘、本地正向代理 + GitHub IP 测速优选。界面基于标准库 tkinter，配合 [tkwebui](https://github.com/bvb6417/tkwebui) 现代 Web 风格组件库，无需 PyQt。
 
 > 这是界面与功能复刻的学习项目，不包含原项目的 WinDivert 内核驱动与 CA 中间人机制。加速采用「本地 HTTP 正向代理 → 域名优选最快 IP → 转发」的方式实现。
 
@@ -33,7 +33,7 @@
 
 ## 安装与运行
 
-环境：Python 3.10+（已在 3.13 验证）
+环境：Python 3.10+（已在 3.14 验证）。tkinter 为标准库自带，无需单独安装。
 
 ```bash
 pip install -r requirements.txt
@@ -79,25 +79,6 @@ FastGithubPy/
 │   └── pages/              五个功能页
 ├── config/                 运行时配置与 IP 缓存
 └── logs/                   运行日志
-```
-
-## 自动打包
-
-仓库已配置 GitHub Actions（`.github/workflows/build.yml`），**每次 push 代码都会自动打包 Windows exe**：
-
-- **普通 push**：打包后自动发布/更新 **Releases** 页的「最新构建（自动更新）」Release，同时提供两个版本，随时可下载最新版：
-  - `FastGithubPy.exe` —— **单文件版**，双击即用，启动约慢几秒（每次解压到临时目录）。
-  - `FastGithubPy-windows.zip` —— **文件夹版**，解压后运行，启动更快。
-  - 两份产物也会在 Actions 运行页的 **Artifacts** 中保留（90 天）。
-- **推送 `v*` 标签**（如 `v1.0`）：在「最新构建」之外，再单独创建一个对应版本号的正式 Release。
-- 也可在 Actions 页面手动点 **Run workflow** 触发。
-
-本地如需手动打包：
-
-```bash
-pip install pyinstaller
-pyinstaller FastGithubPy.spec --noconfirm           # 文件夹版 → dist/FastGithubPy/
-pyinstaller FastGithubPy-onefile.spec --noconfirm   # 单文件版 → dist/FastGithubPy.exe
 ```
 
 ## 说明
