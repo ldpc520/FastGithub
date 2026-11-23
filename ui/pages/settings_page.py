@@ -12,6 +12,18 @@ from ui.widgets import card, toggle_row, divider
 
 
 class SettingsPage(ttk.Frame):
+    INTERVAL_CHOICES = [
+        ("不自动更新", 0),
+        ("15 分钟", 0.25),
+        ("30 分钟", 0.5),
+        ("1 小时", 1),
+        ("2 小时", 2),
+        ("6 小时", 6),
+        ("12 小时", 12),
+        ("24 小时", 24),
+        ("3 天", 72),
+    ]
+
     def __init__(self, service, master=None):
         super().__init__(master)
         self.service = service
@@ -40,7 +52,7 @@ class SettingsPage(ttk.Frame):
         self.mintray_row.pack(fill="x")
         divider(run_body)
         self.autorefresh_row, self.autorefresh_var = toggle_row(
-            run_body, "启动后自动刷新 IP", "启动约 15 秒后自动测速一次")
+            run_body, "启动后检查 IP 缓存", "启动约 15 秒后检查缓存，有效则直接用，过期/缺失才测速")
         self.autorefresh_row.pack(fill="x")
 
         # 代理设置
@@ -83,8 +95,10 @@ class SettingsPage(ttk.Frame):
         ttk.Label(int_row, text="自动更新间隔：").pack(side="left")
         self.interval_var = tk.StringVar()
         self.interval_combo = ttk.Combobox(int_row, textvariable=self.interval_var, state="readonly", width=16)
-        self.interval_combo["values"] = ["不自动更新", "6 小时", "12 小时", "24 小时", "3 天"]
+        self.interval_combo["values"] = [label for label, _ in self.INTERVAL_CHOICES]
         self.interval_combo.pack(side="left")
+        ttk.Label(int_row, text="（缓存过期后自动测速，修改后需重启生效）",
+                  style="Muted.TLabel").pack(side="left", padx=(8, 0))
         host_row = ttk.Frame(ip_body)
         host_row.pack(fill="x", pady=(10, 0))
         ttk.Label(host_row, text="hosts 源：").pack(side="left")
@@ -109,8 +123,8 @@ class SettingsPage(ttk.Frame):
         mode = self.cfg.get("proxy_mode", "pac")
         idx = {"pac": 0, "global": 1, "off": 2}.get(mode, 0)
         self.mode_combo.current(idx)
-        hours = int(self.cfg.get("auto_update_hours", 0))
-        idx = {0: 0, 6: 1, 12: 2, 24: 3, 72: 4}.get(hours, 0)
+        hours = float(self.cfg.get("auto_update_hours", 0) or 0)
+        idx = next((i for i, (_, h) in enumerate(self.INTERVAL_CHOICES) if abs(h - hours) < 1e-6), 0)
         self.interval_combo.current(idx)
         self.refresh_sysproxy_status()
 
@@ -140,7 +154,8 @@ class SettingsPage(ttk.Frame):
         self.refresh_sysproxy_status()
 
     def _save(self):
-        hours = {0: 0, 1: 6, 2: 12, 3: 24, 4: 72}.get(self.interval_combo.current(), 0)
+        sel = self.interval_combo.current()
+        hours = self.INTERVAL_CHOICES[sel][1] if 0 <= sel < len(self.INTERVAL_CHOICES) else 0
         modes = ["pac", "global", "off"]
         self.cfg.update({
             "minimize_to_tray": self.mintray_var.get(),

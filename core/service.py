@@ -89,6 +89,7 @@ class AppService(SignalBus):
         self.worker = AsyncWorker(on_ready=self._on_loop_ready)
         self._proxy_backup: dict = {}
         self._actual_port = int(self.cfg.get("proxy_port", 38457))
+        self._refreshing = False  # 防止启动检查与定时刷新重复发起测速
 
         log.set_callback(lambda level, line: self.log_signal.emit(level, line))
         self.proxy.set_stats_callback(lambda stats: self.stats_signal.emit(stats))
@@ -140,11 +141,38 @@ class AppService(SignalBus):
         self.worker.submit(task(), done)
 
     def refresh_ips(self, timeout_budget: float = 45.0):
+        if self._refreshing:
+            log.debug("已有 IP 测速在进行中，跳过重复刷新")
+            return
+        self._refreshing = True
         log.info("开始刷新 IP 测速…")
-        self.worker.submit(
-            self.ipmgr.refresh_all(timeout_budget),
-            lambda r: self.refresh_done_signal.emit(r),
-        )
+
+        def done(r):
+            self._refreshing = False
+            self.refresh_done_signal.emit(r)
+
+        self.worker.submit(self.ipmgr.refresh_all(timeout_budget), done)
+
+    def refresh_if_stale(self):
+        """启动/定时检查：缓存有效则直接用缓存，仅缺失或过期时才测速。"""
+        if not self.ipmgr.needs_refresh():
+            log.info("IP 缓存有效，直接使用缓存（跳过本轮测速）")
+            return
+        self.refresh_ips()
+
+    def start_auto_timer(self, root):
+        """按 auto_update_hours 设置定时检查缓存新鲜度，0 表示不自动检查。"""
+        hours = float(self.cfg.get("auto_update_hours", 0) or 0)
+        if hours <= 0:
+            return
+        interval_ms = int(hours * 3600 * 1000)
+        root.after(interval_ms, self._auto_tick(root, interval_ms))
+
+    def _auto_tick(self, root, interval_ms):
+        def tick():
+            self.refresh_if_stale()
+            root.after(interval_ms, tick)
+        return tick
 
     # ---------- 节点测速 ----------
     def test_nodes(self):

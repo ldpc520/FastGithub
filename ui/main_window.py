@@ -50,6 +50,8 @@ class MainWindow:
         self._quitting = False
         self._build_ui()
         self._build_tray()
+        # 点标题栏最小化按钮时也收进托盘（与关闭按钮行为一致）
+        root.bind("<Unmap>", self._on_unmap)
         # 定时把 core 线程的信号派发到 UI 主线程
         self._pump()
 
@@ -115,12 +117,26 @@ class MainWindow:
                   text="首次使用请点「更新 IP」测速，再点「启动加速」；程序会自动设置/还原系统代理。",
                   wraplength=780, justify="left").pack(side="left", padx=8)
 
-        # 页面容器
+        # 页面容器：Canvas + 滚动条，内容超出窗口时可滚动（如设置页）
         self.pages: dict[str, tk.Widget] = {}
-        self.container = ttk.Frame(right)
-        self.container.grid(row=3, column=0, sticky="nsew", padx=20, pady=(0, 16))
+        outer = ttk.Frame(right)
+        outer.grid(row=3, column=0, sticky="nsew", padx=20, pady=(0, 16))
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(0, weight=1)
+
+        self.canvas = tk.Canvas(outer, highlightthickness=0, bd=0)
+        self.vbar = ttk.Scrollbar(outer, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self._on_scrollbar)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.vbar.grid(row=0, column=1, sticky="ns")
+
+        self.container = ttk.Frame(self.canvas)
         self.container.columnconfigure(0, weight=1)
-        self.container.rowconfigure(0, weight=1)
+        self._canvas_win = self.canvas.create_window((0, 0), window=self.container, anchor="nw")
+        self.container.bind("<Configure>", lambda e: self._update_scrollregion())
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
         for key, _label, _icon, cls, _t, _s in self.PAGES:
             page = cls(self.service, master=self.container)
             page.grid(row=0, column=0, sticky="nsew")
@@ -132,11 +148,48 @@ class MainWindow:
         # 关闭按钮 → 隐藏到托盘
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
+    # ---------- 页面滚动 ----------
+    def _update_scrollregion(self):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_scrollbar(self, first, last):
+        # 内容没超出可视区时隐藏滚动条，避免空占宽度
+        if float(first) <= 0.0 and float(last) >= 1.0:
+            self.vbar.grid_remove()
+        else:
+            self.vbar.grid(row=0, column=1, sticky="ns")
+
+    def _on_canvas_resize(self, event):
+        # 内部容器宽度跟随 canvas，保证卡片横向铺满
+        self.canvas.itemconfig(self._canvas_win, width=event.width)
+        self._update_scrollregion()
+
+    def _on_mousewheel(self, event):
+        # 输入/下拉/文本控件保留自身滚动，不劫持
+        widget = event.widget
+        if isinstance(widget, (tk.Text, ttk.Entry, tk.Entry, ttk.Combobox, ttk.Spinbox)):
+            return
+        if self.vbar.winfo_viewable() == 0:
+            return
+        try:
+            step = -1 if event.delta > 0 else 1
+            self.canvas.yview_scroll(step * 3, "units")
+        except Exception:
+            pass
+
     def show_page(self, key: str):
         page = self.pages.get(key)
         if not page:
             return
         page.tkraise()
+        # 只让当前页占位，其它页撤出 grid，滚动区域按当前页内容计算
+        for k, p in self.pages.items():
+            if k == key:
+                p.grid(row=0, column=0, sticky="nsew")
+            else:
+                p.grid_forget()
+        self.canvas.yview_moveto(0.0)
+        self.root.after_idle(self._update_scrollregion)
         for item in self.PAGES:
             k = item[0]
             self.nav_buttons[k].configure(style="Selected.Nav.TButton" if k == key else "Nav.TButton")
@@ -176,7 +229,45 @@ class MainWindow:
             )
 
     def show_window(self):
-        self.root.after(0, self.root.deiconify)
+        """从托盘恢复窗口：显示、置顶并抢回焦点。"""
+        def _restore():
+            if self._quitting:
+                return
+            try:
+                self.root.deiconify()
+                self.root.lift()
+                self.root.focus_force()
+            except Exception:
+                pass
+        self.root.after(0, _restore)
+
+    def hide_to_tray(self):
+        """把窗口收进托盘，服务继续后台运行。托盘不可用时拒绝隐藏，避免找不到窗口。"""
+        if self._quitting or not self._tray:
+            return False
+        try:
+            self.root.withdraw()
+            return True
+        except Exception:
+            return False
+
+    def _on_unmap(self, event=None):
+        """点标题栏最小化按钮时收进托盘；主动 withdraw 不是 iconic，不会被误判。"""
+        if self._quitting or not self._tray:
+            return
+        if not self.service.cfg.get("minimize_to_tray", True):
+            return
+        # 推迟到空闲时判断窗口状态，避开窗口管理器的状态切换时序
+        self.root.after_idle(self._maybe_hide_on_minimize)
+
+    def _maybe_hide_on_minimize(self):
+        if self._quitting or not self._tray:
+            return
+        try:
+            if self.root.state() == "iconic":
+                self.hide_to_tray()
+        except Exception:
+            pass
 
     def quit_app(self):
         """真正退出程序：移除托盘图标 → 关闭服务 → 销毁窗口。"""
@@ -198,11 +289,10 @@ class MainWindow:
             pass
 
     def _on_close(self):
-        # 关闭窗口 = 隐藏到托盘，程序继续在后台运行（加速不中断）。
-        # 彻底退出请用托盘右键菜单的"退出"，避免误点 X 导致加速被关。
-        self.root.withdraw()
-        if self._tray:
-            self._tray.notify("FastGithubPy", "已最小化到托盘，加速仍在运行；右键托盘图标可退出")
+        # 点窗口关闭按钮：按设置决定"收进托盘"还是"直接退出"
+        if self.service.cfg.get("minimize_to_tray", True) and self.hide_to_tray():
+            return
+        self.quit_app()
 
     # ---------- 信号泵 ----------
     def _pump(self):

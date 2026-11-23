@@ -1,0 +1,5 @@
+# 由 py简洁打包 本地扫描生成
+aiohttp
+Pillow
+pystray
+tkwebui

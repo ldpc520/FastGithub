@@ -76,6 +76,22 @@ class IpManager:
         except Exception as exc:
             log.warn(f"保存 IP 缓存失败：{exc}")
 
+    def needs_refresh(self) -> bool:
+        """是否需要自动刷新：无缓存→需要；否则按 auto_update_hours 判断缓存是否过期。
+
+        auto_update_hours == 0（设置里选"不自动更新"）时，只要已有缓存就视为有效，
+        避免每次启动都重新测速；首次运行缓存为空仍会刷新一次。
+        """
+        if not self.states:
+            return True
+        hours = float(self.cfg.get("auto_update_hours", 0) or 0)
+        if hours <= 0:
+            return False
+        newest = max((s.last_refresh for s in self.states.values()), default=0.0)
+        if newest <= 0:
+            return True
+        return (time.time() - newest) >= hours * 3600
+
     # ---------------- 候选来源 ----------------
     async def _fetch_hosts_source(self, session: aiohttp.ClientSession) -> dict[str, list[str]]:
         result: dict[str, list[str]] = {}

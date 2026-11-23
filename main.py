@@ -45,9 +45,15 @@ def main():
     service = AppService()
     window = MainWindow(root, service)
 
-    # 启动后约 15 秒自动刷新 IP
+    # --minimized：开机自启/后台启动时直接收进托盘（托盘不可用则保持窗口可见）
+    if "--minimized" in sys.argv:
+        window.hide_to_tray()
+
+    # 启动后约 15 秒检查 IP 缓存：有效则直接用，缺失/过期才测速
     if service.cfg.get("auto_start_refresh", True):
-        root.after(15000, service.refresh_ips)
+        root.after(15000, service.refresh_if_stale)
+    # 按设置里的"自动更新间隔"定时检查（0=不自动更新）
+    service.start_auto_timer(root)
 
     try:
         root.mainloop()
