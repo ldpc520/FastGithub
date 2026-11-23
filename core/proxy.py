@@ -128,13 +128,15 @@ class LocalProxy:
         except Exception as exc:
             self.stats.failures += 1
             self.ipmgr.report_failure(host, remote_host)
-            log.warn(f"CONNECT {target} 连接失败：{exc}")
+            log.log("ACCESS_FAIL", f"CONNECT {host}:{port} → {remote_host}:{port} 失败：{exc}")
             writer.write(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
             await writer.drain()
             return
+        log.log("ACCESS_OK", f"CONNECT {host}:{port} → {remote_host}:{port} 已连通")
         writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         await writer.drain()
-        await self._pipe(reader, writer, remote_r, remote_w)
+        # 把域名/IP 传给 _pipe，便于传输中途失败时上报熔断
+        await self._pipe(reader, writer, remote_r, remote_w, host, remote_host)
 
     async def _forward_http(
         self,
@@ -157,10 +159,11 @@ class LocalProxy:
             )
         except Exception as exc:
             self.stats.failures += 1
-            log.warn(f"{target} 连接失败：{exc}")
+            log.log("ACCESS_FAIL", f"{method} {target} → {remote_host}:{remote_port} 失败：{exc}")
             writer.write(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
             await writer.drain()
             return
+        log.log("ACCESS_OK", f"{method} {target} → {remote_host}:{remote_port} 已连通")
 
         path = parsed.path or "/"
         if parsed.query:
@@ -174,7 +177,7 @@ class LocalProxy:
         if body:
             remote_w.write(body)
         await remote_w.drain()
-        await self._pipe(reader, writer, remote_r, remote_w)
+        await self._pipe(reader, writer, remote_r, remote_w, host, remote_host)
 
     async def _pipe(
         self,
@@ -182,7 +185,18 @@ class LocalProxy:
         client_w: asyncio.StreamWriter,
         remote_r: asyncio.StreamReader,
         remote_w: asyncio.StreamWriter,
+        domain: str = "",
+        remote_host: str = "",
     ) -> None:
+        """双向转发。传输中途"收到数据后被重置"上报熔断，避免坏 IP 一直被使用。
+
+        区分两类结束：
+        - 正常关闭：read 返回 b''（浏览器看完页面主动断），bytes>0 一路顺，不算失败；
+        - 异常中断：drain/read 抛异常，或上游在传输中途 reset（已传过数据却异常），
+          说明这个 IP 建连没问题但传不住数据——交给 report_failure 拉黑并切换。
+        """
+        state = {"up_bytes": 0, "down_bytes": 0, "up_err": False, "down_err": False}
+
         async def c2r() -> None:
             try:
                 while True:
@@ -190,10 +204,11 @@ class LocalProxy:
                     if not data:
                         break
                     self.stats.upload += len(data)
+                    state["up_bytes"] += len(data)
                     remote_w.write(data)
                     await remote_w.drain()
             except Exception:
-                pass
+                state["up_err"] = True
             finally:
                 try:
                     remote_w.close()
@@ -207,10 +222,11 @@ class LocalProxy:
                     if not data:
                         break
                     self.stats.download += len(data)
+                    state["down_bytes"] += len(data)
                     client_w.write(data)
                     await client_w.drain()
             except Exception:
-                pass
+                state["down_err"] = True
             finally:
                 try:
                     client_w.close()
@@ -218,3 +234,11 @@ class LocalProxy:
                     pass
 
         await asyncio.gather(c2r(), r2c(), return_exceptions=True)
+
+        # 只有"确实传过数据却中途异常"才判定上游失效；纯粹的客户主动断开不算。
+        if domain and remote_host and (state["up_err"] or state["down_err"]):
+            if state["up_bytes"] > 0 or state["down_bytes"] > 0:
+                self.stats.failures += 1
+                log.log("ACCESS_FAIL", f"传输中断 {domain} → {remote_host}（已传 "
+                        f"{state['up_bytes']}↑/{state['down_bytes']}↓），触发熔断切换")
+                self.ipmgr.report_failure(domain, remote_host)

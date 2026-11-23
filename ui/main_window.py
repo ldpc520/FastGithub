@@ -198,8 +198,11 @@ class MainWindow:
             pass
 
     def _on_close(self):
-        # 关闭窗口 = 直接退出（避免"点了关闭却退不出"的困惑）
-        self.quit_app()
+        # 关闭窗口 = 隐藏到托盘，程序继续在后台运行（加速不中断）。
+        # 彻底退出请用托盘右键菜单的"退出"，避免误点 X 导致加速被关。
+        self.root.withdraw()
+        if self._tray:
+            self._tray.notify("FastGithubPy", "已最小化到托盘，加速仍在运行；右键托盘图标可退出")
 
     # ---------- 信号泵 ----------
     def _pump(self):

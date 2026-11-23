@@ -37,6 +37,7 @@ class IpManager:
         self.cfg = cfg
         self.states: dict[str, IpState] = {}
         self._lock = asyncio.Lock()
+        self._last_reprobe: dict[str, float] = {}  # 域名 → 上次自愈重探测时间（防抖）
         self._load_cache()
 
     # ---------------- 缓存 ----------------
@@ -346,16 +347,59 @@ class IpManager:
         return None
 
     def report_failure(self, domain: str, ip: str) -> None:
-        """请求阶段失败：拉黑该 IP 90 秒。"""
+        """请求阶段失败：拉黑该 IP 90 秒，切换次优；无备用时触发后台自愈重探测。"""
         st = self.states.get(domain)
         if not st:
             return
         st.blacklist[ip] = time.time()
-        alive = [e for e in st.endpoints if e.ip != ip and e.ok]
+        alive = [e for e in st.endpoints if e.ip != ip and e.ok and e.ip not in st.blacklist]
         alive.sort(key=lambda e: e.latency_ms)
         st.endpoints = alive
         st.best = alive[0].ip if alive else None
         log.warn(f"{domain} 上游 {ip} 失败，已拉黑 90 秒，切换至 {st.best or '无'}")
+        if not alive:
+            # 没有任何可用备用：安排一次后台重探测，避免域名回退到被污染的
+            # 原始 DNS 后彻底断连（gist 那种"切换至无"的死局）。
+            self._schedule_reprobe(domain)
+
+    # ---------------- 失败自愈 ----------------
+    def _schedule_reprobe(self, domain: str) -> None:
+        """防抖安排后台重探测：30 秒内同一域名只触发一次，避免风暴。"""
+        now = time.time()
+        last = self._last_reprobe.get(domain, 0.0)
+        if now - last < 30.0:
+            return
+        self._last_reprobe[domain] = now
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._background_reprobe(domain))
+            log.info(f"{domain} 已安排后台自愈重探测")
+        except RuntimeError:
+            # 没有运行中的事件循环（极少见），跳过
+            pass
+
+    async def _background_reprobe(self, domain: str) -> None:
+        """后台重探测：重新拉取候选池、清空旧黑名单，再探测择优。"""
+        await asyncio.sleep(2.0)
+        log.info(f"{domain} 后台自愈重探测开始")
+        try:
+            # 重新拉取权威候选（meta/hosts），避免候选池只剩内置兜底
+            async with aiohttp.ClientSession() as session:
+                hosts, meta = await asyncio.gather(
+                    self._fetch_hosts_source(session),
+                    self._fetch_meta(session),
+                )
+            async with self._lock:
+                st = self.states.get(domain)
+                if st:
+                    st.blacklist.clear()  # 故障 IP 已冷却，重新参与评估
+            result = await self.probe_domain(domain, hosts, meta)
+            if result.best:
+                log.info(f"{domain} 自愈完成，新最快 IP：{result.best}")
+            else:
+                log.warn(f"{domain} 自愈后仍无可用 IP")
+        except Exception as exc:
+            log.warn(f"{domain} 后台自愈重探测异常：{exc}")
 
     def status_rows(self) -> list[dict]:
         rows = []
